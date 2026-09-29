@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title data-i18n="ref.title">video2mixamo · refinamento</title>
+<link rel="stylesheet" href="/static/style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <h1>video2mixamo</h1>
+    <span class="sub" data-i18n="ref.sub">refino de animação — filtros · constraints · editor de bone</span>
+  </div>
+  <div class="topbar-right">
+    <div class="lang-switch" id="lang-switch" role="group" aria-label="idioma"></div>
+    <div class="status-chip"><a href="/" style="color:inherit;text-decoration:none" data-i18n="nav.back">← voltar ao pipeline</a></div>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="panel controls">
+    <h2 data-i18n="rsec.clip">1 · Clipe</h2>
+    <label class="field"><span data-i18n="form.job">Job (com anim.json)</span><select id="job"></select></label>
+    <p class="hint" id="job-hint" data-i18n="hint.jobSelect">selecione um clipe processado.</p>
+    <div class="row"><span data-i18n="row.frames">frames</span><b id="info-frames">—</b></div>
+    <div class="row"><span data-i18n="row.bones">ossos animados</span><b id="info-bones">—</b></div>
+    <div class="row"><span data-i18n="row.session">sessão</span><b id="info-session">—</b></div>
+
+    <h2 data-i18n="rsec.bone">2 · Editor de bone</h2>
+    <label class="field"><span data-i18n="form.bone">osso</span><select id="bone"></select></label>
+    <label class="field"><span><span data-i18n="form.frameTargetLabel">frame alvo:</span> <b id="frame-label">0</b></span>
+      <input type="range" id="frame" min="0" max="0" value="0" step="1" /></label>
+    <div class="grid2">
+      <label class="field"><span>rot X <b id="rx-label">0°</b></span><input type="range" id="rx" min="-180" max="180" value="0" step="1" /></label>
+      <label class="field"><span>rot Y <b id="ry-label">0°</b></span><input type="range" id="ry" min="-180" max="180" value="0" step="1" /></label>
+      <label class="field"><span>rot Z <b id="rz-label">0°</b></span><input type="range" id="rz" min="-180" max="180" value="0" step="1" /></label>
+      <label class="field"><span data-i18n="form.note">nota</span><input type="text" id="note" placeholder="ex.: virar a cabeça" data-i18n-placeholder="form.notePh" /></label>
+    </div>
+    <div class="grid2">
+      <label class="field"><span data-i18n="form.rangeStart">afetar do frame</span><input type="number" id="start" value="0" min="0" /></label>
+      <label class="field"><span data-i18n="form.rangeEnd">até o frame</span><input type="number" id="end" value="0" min="0" /></label>
+    </div>
+    <p class="hint" id="edit-hint" data-i18n="hint.rebake">o rebake interpola do último frame não afetado até o frame editado (e de volta).</p>
+    <button id="apply-edit" class="primary" data-i18n="btn.applyEdit">Aplicar edição</button>
+    <div class="downloads" style="margin-top:10px">
+      <button id="undo" class="ghost" data-i18n="btn.undo">↶ desfazer</button>
+      <button id="redo" class="ghost" data-i18n="btn.redo">↷ refazer</button>
+      <button id="reset" class="ghost" data-i18n="btn.clearEdits">limpar edições</button>
+    </div>
+
+    <h2 data-i18n="rsec.filters">3 · Estabilização</h2>
+    <div id="filters" class="checklist"></div>
+    <div class="downloads">
+      <button id="compare" class="ghost" data-i18n="btn.compare">Comparar filtros</button>
+      <button id="apply-refine" class="ghost" data-i18n="btn.applyRefine">Aplicar refino</button>
+    </div>
+    <div id="cmp" class="report hidden"></div>
+    <div class="downloads" style="margin-top:10px">
+      <a id="dl-refined-glb" class="ghost disabled" href="#" download data-i18n="btn.dlRefGlb">GLB refinado</a>
+      <a id="dl-refined-fbx" class="ghost disabled" href="#" download data-i18n="btn.dlRefFbx">FBX refinado</a>
+    </div>
+
+    <h2 data-i18n="rsec.constraints">4 · Constraints</h2>
+    <p class="hint" data-i18n-html="hint.constraintsHtml">limites por junta (graus). <code>cone</code> limita o desvio total; <code>x/y/z</code> limitam um eixo, com min/max assimétricos. Salvo em <code>config/constraints_humanoid.yaml</code>.</p>
+    <div id="limits" class="limits"></div>
+    <button id="save-limits" class="primary" data-i18n="btn.saveLimits">Salvar limites</button>
+    <p class="hint" id="limits-msg"></p>
+  </section>
+
+  <section class="panel viewer">
+    <div class="viewer-head">
+      <h2 data-i18n="rsec.preview">5 · Prévia do clipe editado</h2>
+      <div class="cameras">
+        <label class="inline-chk" data-i18n-title="ui.syncRotTitle" title="sincroniza a câmera entre o esqueleto e a malha">
+          <input type="checkbox" id="sync-rot" checked />
+          <span data-i18n="ui.syncRot">sync rotation</span>
+        </label>
+        <button data-cam="persp" class="ghost" data-i18n="cam.persp">perspectiva</button>
+        <button data-cam="front" class="ghost" data-i18n="cam.front">frente</button>
+        <button data-cam="side" class="ghost" data-i18n="cam.side">lado</button>
+      </div>
+    </div>
+    <div class="split">
+      <div class="pane">
+        <div class="pane-title" data-i18n="viewer.video">vídeo de referência</div>
+        <video id="refvideo" muted playsinline preload="auto"></video>
+        <div class="pane-empty" id="video-empty" data-i18n="ref.loadClip">carregue um clipe</div>
+      </div>
+      <div class="pane">
+        <div class="pane-title" data-i18n="viewer.skel">esqueleto (rig Mixamo)</div>
+        <div id="canvas-skel" class="canvas-wrap"><div class="pane-empty" id="empty-skel" data-i18n="ref.loadClip">carregue um clipe</div></div>
+      </div>
+      <div class="pane">
+        <div class="pane-title" data-i18n="viewer.mesh">malha</div>
+        <div id="canvas-mesh" class="canvas-wrap"><div class="pane-empty" id="empty-mesh" data-i18n="ref.loadClip">carregue um clipe</div></div>
+      </div>
+    </div>
+    <div class="playbar">
+      <button id="playpause" class="primary small">▶︎</button>
+      <input type="range" id="timeline" min="0" max="1000" value="0" step="1" />
+      <span id="time" class="mono">0.00 / 0.00 s</span>
+    </div>
+    <p class="hint" id="preview-note" data-i18n="hint.previewNote">a prévia mostra o vídeo de referência e o clipe já com as suas edições.</p>
+    <pre class="log" id="log" data-i18n="ref.logReady">pronto.</pre>
+  </section>
+</main>
+<script type="module" src="/static/refine.js"></script>
+</body>
+</html>

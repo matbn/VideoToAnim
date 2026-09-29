@@ -1,0 +1,237 @@
+# Constraints articulares — preset humanoide (video2mixamo)
+#
+# kind:  cone  -> limita o angulo TOTAL da rotacao local (graus)
+#        x/y/z -> limita um eixo especifico, com min/max ASSIMETRICOS
+# stiffness: 0..1 — 1 corrige integralmente, 0 ignora; valores intermediarios
+#            aplicam correcao suave (slerp), sem corte seco.
+#
+# Edite livremente: na proxima execucao o preset e recarregado do arquivo.
+# min_deg > max_deg, stiffness fora de [0,1] ou osso inexistente geram ERRO claro.
+#
+name: humanoid
+default_stiffness: 1.0
+limits:
+- bone: Spine
+  kind: x
+  min_deg: -30.0
+  max_deg: 30.0
+  stiffness: 1.0
+  note: flexao/extensao do tronco
+  note_en: trunk flexion/extension
+- bone: Spine
+  kind: y
+  min_deg: -35.0
+  max_deg: 35.0
+  stiffness: 1.0
+  note: rotacao/rolagem limitada
+  note_en: rotation/twist limited
+- bone: Spine
+  kind: z
+  min_deg: -30.0
+  max_deg: 30.0
+  stiffness: 1.0
+  note: inclinacao lateral
+  note_en: lateral tilt
+- bone: Spine1
+  kind: x
+  min_deg: -30.0
+  max_deg: 30.0
+  stiffness: 1.0
+  note: flexao/extensao do tronco
+  note_en: trunk flexion/extension
+- bone: Spine1
+  kind: y
+  min_deg: -35.0
+  max_deg: 35.0
+  stiffness: 1.0
+  note: rotacao/rolagem limitada
+  note_en: rotation/twist limited
+- bone: Spine1
+  kind: z
+  min_deg: -30.0
+  max_deg: 30.0
+  stiffness: 1.0
+  note: inclinacao lateral
+  note_en: lateral tilt
+- bone: Spine2
+  kind: x
+  min_deg: -30.0
+  max_deg: 30.0
+  stiffness: 1.0
+  note: flexao/extensao do tronco
+  note_en: trunk flexion/extension
+- bone: Spine2
+  kind: y
+  min_deg: -35.0
+  max_deg: 35.0
+  stiffness: 1.0
+  note: rotacao/rolagem limitada
+  note_en: rotation/twist limited
+- bone: Spine2
+  kind: z
+  min_deg: -30.0
+  max_deg: 30.0
+  stiffness: 1.0
+  note: inclinacao lateral
+  note_en: lateral tilt
+- bone: Neck
+  kind: cone
+  min_deg: -180.0
+  max_deg: 60.0
+  stiffness: 1.0
+  note: 'pescoco: no maximo 60 graus de desvio'
+  note_en: 'neck: at most 60 degrees of deviation'
+- bone: Neck
+  kind: y
+  min_deg: -60.0
+  max_deg: 60.0
+  stiffness: 1.0
+  note: rotacao do pescoco
+  note_en: neck rotation
+- bone: Head
+  kind: cone
+  min_deg: -180.0
+  max_deg: 50.0
+  stiffness: 1.0
+  note: 'cabeca: nunca 180 — aqui 50 graus'
+  note_en: 'head: never 180 - 50 degrees here'
+- bone: Head
+  kind: y
+  min_deg: -70.0
+  max_deg: 70.0
+  stiffness: 1.0
+  note: rotacao lateral da cabeca
+  note_en: head side rotation
+- bone: Head
+  kind: x
+  min_deg: -35.0
+  max_deg: 35.0
+  stiffness: 1.0
+  note: aceno
+  note_en: nod
+- bone: LeftShoulder
+  kind: cone
+  min_deg: -180.0
+  max_deg: 40.0
+  stiffness: 1.0
+  note: 'clavicula: movimento pequeno'
+  note_en: 'clavicle: small movement'
+- bone: LeftArm
+  kind: cone
+  min_deg: -180.0
+  max_deg: 160.0
+  stiffness: 1.0
+  note: 'ombro: cone amplo, mas nao 180'
+  note_en: 'shoulder: wide cone, but not 180'
+- bone: LeftForeArm
+  kind: cone
+  min_deg: -180.0
+  max_deg: 165.0
+  stiffness: 1.0
+  note: 'cotovelo: cone'
+  note_en: 'elbow: cone'
+- bone: LeftForeArm
+  kind: z
+  min_deg: -5.0
+  max_deg: 160.0
+  stiffness: 1.0
+  note: cotovelo NAO hiperextende (assimetrico)
+  note_en: elbow does NOT hyperextend (asymmetric)
+- bone: LeftHand
+  kind: cone
+  min_deg: -180.0
+  max_deg: 80.0
+  stiffness: 1.0
+  note: punho
+  note_en: wrist
+- bone: LeftUpLeg
+  kind: cone
+  min_deg: -180.0
+  max_deg: 130.0
+  stiffness: 1.0
+  note: 'quadril: cone amplo'
+  note_en: 'hip: wide cone'
+- bone: LeftLeg
+  kind: cone
+  min_deg: -180.0
+  max_deg: 160.0
+  stiffness: 1.0
+  note: 'joelho: cone'
+  note_en: 'knee: cone'
+- bone: LeftLeg
+  kind: z
+  min_deg: -155.0
+  max_deg: 5.0
+  stiffness: 1.0
+  note: joelho NAO hiperextende (assimetrico)
+  note_en: knee does NOT hyperextend (asymmetric)
+- bone: LeftFoot
+  kind: cone
+  min_deg: -180.0
+  max_deg: 60.0
+  stiffness: 1.0
+  note: tornozelo
+  note_en: ankle
+- bone: RightShoulder
+  kind: cone
+  min_deg: -180.0
+  max_deg: 40.0
+  stiffness: 1.0
+  note: 'clavicula: movimento pequeno'
+  note_en: 'clavicle: small movement'
+- bone: RightArm
+  kind: cone
+  min_deg: -180.0
+  max_deg: 160.0
+  stiffness: 1.0
+  note: 'ombro: cone amplo, mas nao 180'
+  note_en: 'shoulder: wide cone, but not 180'
+- bone: RightForeArm
+  kind: cone
+  min_deg: -180.0
+  max_deg: 165.0
+  stiffness: 1.0
+  note: 'cotovelo: cone'
+  note_en: 'elbow: cone'
+- bone: RightForeArm
+  kind: z
+  min_deg: -5.0
+  max_deg: 160.0
+  stiffness: 1.0
+  note: cotovelo NAO hiperextende (assimetrico)
+  note_en: elbow does NOT hyperextend (asymmetric)
+- bone: RightHand
+  kind: cone
+  min_deg: -180.0
+  max_deg: 80.0
+  stiffness: 1.0
+  note: punho
+  note_en: wrist
+- bone: RightUpLeg
+  kind: cone
+  min_deg: -180.0
+  max_deg: 130.0
+  stiffness: 1.0
+  note: 'quadril: cone amplo'
+  note_en: 'hip: wide cone'
+- bone: RightLeg
+  kind: cone
+  min_deg: -180.0
+  max_deg: 160.0
+  stiffness: 1.0
+  note: 'joelho: cone'
+  note_en: 'knee: cone'
+- bone: RightLeg
+  kind: z
+  min_deg: -155.0
+  max_deg: 5.0
+  stiffness: 1.0
+  note: joelho NAO hiperextende (assimetrico)
+  note_en: knee does NOT hyperextend (asymmetric)
+- bone: RightFoot
+  kind: cone
+  min_deg: -180.0
+  max_deg: 60.0
+  stiffness: 1.0
+  note: tornozelo
+  note_en: ankle

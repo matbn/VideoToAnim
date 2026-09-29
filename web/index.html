@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title data-i18n="app.title">video2mixamo · laboratório de retarget</title>
+<link rel="stylesheet" href="/static/style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <h1>video2mixamo</h1>
+    <span class="sub" data-i18n="app.sub">vídeo → esqueleto Mixamo</span>
+  </div>
+  <div class="topbar-right">
+    <div class="lang-switch" id="lang-switch" role="group" aria-label="idioma"></div>
+    <a class="ghost small" href="/refine" id="nav-refine" data-i18n="nav.refine">editor de refino →</a>
+    <div class="status-chip" id="health" data-i18n="nav.checking">verificando…</div>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="panel controls">
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="new" role="tab" data-i18n="tab.new">Novo job</button>
+      <button class="tab" data-tab="history" role="tab"><span data-i18n="tab.history">Histórico</span> <span class="badge" id="hist-count">0</span></button>
+    </div>
+
+    <div id="tab-new">
+      <h2 data-i18n="sec.input">1 · Entrada</h2>
+      <label class="field">
+        <span data-i18n="form.backend">Backend de pose</span>
+        <select id="backend"></select>
+      </label>
+      <p class="hint" id="backend-hint"></p>
+      <button id="install-btn" class="ghost small hidden" style="margin:-6px 0 12px" data-i18n="btn.install">Instalar automaticamente</button>
+      <pre class="log hidden" id="install-log"></pre>
+
+      <label class="field">
+        <span data-i18n="form.video">Vídeo (mp4/mov)</span>
+        <input type="file" id="video" accept="video/mp4,video/quicktime,video/*" />
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.mesh">Malha Mixamo (opcional, .fbx/.glb)</span>
+        <input type="file" id="mesh" accept=".glb,.gltf,.fbx" />
+      </label>
+      <p class="hint" id="mesh-hint" data-i18n="hint.meshNone">sem malha: o preview usa "capsule sticks".</p>
+      <button id="check-mesh" class="ghost small" style="margin:-6px 0 14px" data-i18n="btn.checkMesh">Verificar malha</button>
+
+      <h2 data-i18n="sec.params">2 · Parâmetros</h2>
+      <div class="grid2">
+        <label class="field"><span data-i18n="form.fps">fps de saída</span><input type="number" id="fps" value="30" min="1" max="120" /></label>
+        <label class="field"><span data-i18n="form.maxframes">máx. frames</span><input type="number" id="maxframes" placeholder="todos" min="1" /></label>
+        <label class="field"><span data-i18n="form.filter">estabilização da animação</span>
+          <select id="refine-filter">
+            <option value="one_euro" selected>one-euro</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="form.constraints">constraints articulares</span>
+          <select id="refine-constraints">
+            <option value="1" selected data-i18n="form.constraints.on">preset humanoide</option>
+            <option value="0" data-i18n="form.constraints.off">desligadas</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="form.lifter">lifter 2D→3D</span>
+          <select id="lifter"><option value="1" data-i18n="form.lifter.analytic">analítico</option><option value="0" data-i18n="form.lifter.off">desligado</option></select>
+        </label>
+      </div>
+            <label class="field checkbox-line">
+        <input type="checkbox" id="hands" />
+        <span><span data-i18n="form.hands">hand tracking — anima os 40 ossos de dedo</span> <small data-i18n="form.handsSmall">(requer MediaPipe; baixa o modelo de ~8 MB)</small></span>
+      </label>
+<p class="hint" data-i18n-html="hint.refineHtml">a estabilização e os constraints vêm da camada de refino — ajuste fino, comparação de
+        filtros e edição por osso/frame no <a href="/refine">editor de refino</a>.</p>
+
+      <button id="submit" class="primary" data-i18n="btn.process">Processar vídeo</button>
+
+      <h2 data-i18n="sec.job">3 · Job</h2>
+      <div class="job">
+        <div class="row"><span data-i18n="job.id">id</span><b id="job-id">—</b></div>
+        <div class="row"><span data-i18n="job.status">status</span><b id="job-status">—</b></div>
+        <div class="row"><span data-i18n="job.backend">backend</span><b id="job-backend">—</b></div>
+        <div class="row"><span data-i18n="job.license">licença</span><b id="job-license">—</b></div>
+        <div class="row"><span data-i18n="job.mesh">malha</span><b id="job-mesh">—</b></div>
+        <div class="row"><span data-i18n="job.metrics">métricas</span><b id="job-metrics">—</b></div>
+        <pre class="log" id="job-log" data-i18n="job.noRuns">sem execuções ainda.</pre>
+        <div id="mesh-report" class="report hidden"></div>
+        <div class="downloads">
+          <a id="dl-glb" class="ghost disabled" href="#" download data-i18n="btn.dlGlb">baixar GLB</a>
+          <a id="dl-fbx" class="ghost disabled" href="#" download data-i18n="btn.dlFbx">baixar FBX</a>
+        </div>
+        <div class="downloads" style="margin-top:8px">
+          <a id="open-refine" class="ghost disabled" href="/refine" data-i18n="btn.openRefine">abrir no editor →</a>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-history" class="hidden">
+      <h2 data-i18n="sec.history">Histórico de jobs</h2>
+      <div class="grid2">
+        <label class="field"><span data-i18n="hist.status">status</span>
+          <select id="hist-status">
+            <option value="" data-i18n="hist.all">todos</option>
+            <option value="done" data-i18n="hist.done">concluídos</option>
+            <option value="error" data-i18n="hist.error">com erro</option>
+            <option value="running" data-i18n="hist.running">executando</option>
+            <option value="queued" data-i18n="hist.queued">na fila</option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="hist.backend">backend</span><select id="hist-backend"><option value="">todos</option></select></label>
+      </div>
+      <div class="downloads" style="margin-bottom:10px">
+        <button id="hist-refresh" class="ghost" data-i18n="btn.refresh">atualizar</button>
+        <button id="hist-open-last" class="ghost" data-i18n="btn.openLast">abrir o mais recente</button>
+      </div>
+      <div id="hist-table" class="hist"><p class="hint" data-i18n="hist.loading">carregando…</p></div>
+      <p class="hint" id="hist-note" data-i18n="hist.note">clique em uma linha para reabrir o resultado no visualizador.</p>
+    </div>
+  </section>
+
+  <section class="panel viewer">
+    <div class="viewer-head">
+      <h2 data-i18n="sec.compare">4 · Comparação: referência × esqueleto × malha</h2>
+      <div class="cameras">
+        <label class="inline-chk" data-i18n-title="ui.syncRotTitle" title="sincroniza a câmera entre o esqueleto e a malha">
+          <input type="checkbox" id="sync-rot" checked />
+          <span data-i18n="ui.syncRot">sync rotation</span>
+        </label>
+        <button data-cam="persp" class="ghost" data-i18n="cam.persp">perspectiva</button>
+        <button data-cam="front" class="ghost" data-i18n="cam.front">frente</button>
+        <button data-cam="back" class="ghost" data-i18n="cam.back">costas</button>
+        <button data-cam="side" class="ghost" data-i18n="cam.side">lado</button>
+        <button data-cam="top" class="ghost" data-i18n="cam.top">topo</button>
+      </div>
+    </div>
+    <div class="split">
+      <div class="pane">
+        <div class="pane-title" data-i18n="viewer.video">vídeo de referência</div>
+        <video id="refvideo" muted playsinline></video>
+        <div class="pane-empty" id="video-empty" data-i18n="empty.sendVideo">envie um vídeo</div>
+      </div>
+      <div class="pane">
+        <div class="pane-title" id="title-skel" data-i18n="viewer.skel">esqueleto (rig Mixamo)</div>
+        <div id="canvas-skel" class="canvas-wrap">
+          <div class="pane-empty" id="empty-skel" data-i18n="empty.await">aguardando o resultado</div>
+        </div>
+      </div>
+      <div class="pane">
+        <div class="pane-title" id="title-mesh" data-i18n="viewer.mesh">malha</div>
+        <div id="canvas-mesh" class="canvas-wrap">
+          <div class="pane-empty" id="empty-mesh" data-i18n="empty.await">aguardando o resultado</div>
+        </div>
+      </div>
+    </div>
+    <div class="playbar">
+      <button id="playpause" class="primary small">▶︎</button>
+      <input type="range" id="timeline" min="0" max="1000" value="0" step="1" />
+      <span id="time" class="mono">0.00 / 0.00 s</span>
+    </div>
+    <p class="hint" id="sync-note" data-i18n="hint.timeline">a timeline controla o vídeo, o esqueleto e a malha ao mesmo tempo.</p>
+  </section>
+</main>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

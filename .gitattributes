@@ -1,0 +1,14 @@
+# normaliza finais de linha (evita ruido CRLF/LF entre maquinas)
+* text=auto
+
+# binarios: nao mexer
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.glb binary
+*.gltf binary
+*.fbx binary
+*.onnx binary
+*.task binary
+*.db binary

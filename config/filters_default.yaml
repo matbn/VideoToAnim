@@ -1,0 +1,30 @@
+# Plano de filtragem padrao (video2mixamo)
+#
+# Regras sao avaliadas em ordem; a ultima que casar com o osso vence.
+# Campos: name, params, bones (opcional = todos), start/end (intervalo de
+# frames, inclusivo), axis (x|y|z|w = filtra so esse componente).
+#
+# Filtros disponiveis: one_euro, moving_average, savgol, kalman, butterworth,
+# double_exponential (ver docs/REFINE.md para os parametros de cada um).
+apply_to_translation: true
+filters:
+  # Maos e punhos tremem mais que o resto: One-Euro reativo + janela do SavGol
+  - name: one_euro
+    params:
+      min_cutoff: 1.2
+      beta: 0.03
+    bones: [LeftHand, RightHand, LeftForeArm, RightForeArm]
+
+  # Coluna: passa-baixa suave e sem atraso de fase (nao queremos perder a
+  # intencao do movimento do tronco)
+  - name: butterworth
+    params:
+      cutoff_hz: 6.0
+      zero_phase: true
+    bones: [Spine, Spine1, Spine2]
+
+  # Padrao global para todo o resto
+  - name: savgol
+    params:
+      window: 9
+      order: 2

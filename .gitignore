@@ -1,0 +1,42 @@
+# =====================================================================
+# video2mixamo - .gitignore
+# =====================================================================
+
+# ---- saidas de processamento (uploads, jobs, refino, historico) ------
+storage/
+
+# ---- baixados pelo provisionamento automatico ------------------------
+models/
+third_party/
+
+# ---- ambientes virtuais e caches -------------------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+
+# ---- segredos / configuracao local -----------------------------------
+.env
+.env.*
+
+# ---- logs e temporarios ----------------------------------------------
+*.log
+*.out
+*.err
+tmp/
+temp/
+
+# ---- sistema operacional / editores ----------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
