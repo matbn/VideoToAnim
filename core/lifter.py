@@ -113,8 +113,15 @@ class AnalyticLifter(Lifter):
         half = _BONE["shoulder_w"] / 2.0
         p[ci["left_shoulder"]] = center_sh + np.array([half, 0.0, 0.0])
         p[ci["right_shoulder"]] = center_sh + np.array([-half, 0.0, 0.0])
-        # cabeca
-        nose = solve("neck", center_sh, ci["nose"], _BONE["neck"])
+        # cabeca: o nariz fica no PLANO do torax (z do centro dos ombros).
+        # Antes usava-se solve("neck", ...) com distancia rigida: quando a
+        # distancia 2D ombro->nariz caia abaixo de _BONE["neck"], o termo
+        # sqrt(L^2 - d^2) dava um "mergulho" de ate ~0.19 m de profundidade em
+        # UM frame (a cabeca girava sozinha, dezenas de graus). O retarget usa
+        # apenas a DIRECAO nariz->ombros; com z estavel ela deixa de oscilar.
+        nose = np.array([p[ci["nose"]][0], p[ci["nose"]][1], center_sh[2]],
+                        dtype=np.float64)
+        p[ci["nose"]] = nose
         # bracos
         solve("upper_arm_l", p[ci["left_shoulder"]], ci["left_elbow"], _BONE["upper_arm"])
         solve("forearm_l", p[ci["left_elbow"]], ci["left_wrist"], _BONE["forearm"])
@@ -129,12 +136,12 @@ class AnalyticLifter(Lifter):
         solve("shin_l", p[ci["left_knee"]], ci["left_ankle"], _BONE["shin"])
         solve("thigh_r", p[ci["right_hip"]], ci["right_knee"], _BONE["thigh"])
         solve("shin_r", p[ci["right_knee"]], ci["right_ankle"], _BONE["shin"])
-        # olhos/orelhas proximos a cabeca
-        for idx, off in (
-            (ci["left_eye"], (0.03, 0.02, 0.0)), (ci["right_eye"], (-0.03, 0.02, 0.0)),
-            (ci["left_ear"], (0.06, 0.0, 0.0)), (ci["right_ear"], (-0.06, 0.0, 0.0)),
-        ):
-            p[idx] = nose + np.asarray(off, dtype=np.float64)
+        # olhos/orelhas: posicoes REAIS no plano (no z do torax). Antes eram
+        # copiadas do nariz com offsets fixos, descartando a orientacao da cabeca;
+        # a linha dos olhos e a medida estavel de rotacao da cabeca (independe da
+        # translacao do corpo, que enganava o proxy antigo nariz-vs-ombros).
+        for idx in (ci["left_eye"], ci["right_eye"], ci["left_ear"], ci["right_ear"]):
+            p[idx] = np.array([p[idx][0], p[idx][1], nose[2]], dtype=np.float64)
 
         kp3d = np.stack([p[i] for i in range(kp.shape[0])], axis=0).astype(np.float32)
         return FramePose(f.kp2d, f.score, kp3d, f.width, f.height, dict(f.meta))

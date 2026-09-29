@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.4.8] — Cabeça estável: orientação pelos olhos + profundidade sem singularidade
+
+### Corrigido (relatado: "a cabeça do esqueleto se move mesmo com a cabeça parada no vídeo")
+
+* **Profundidade do nariz**: o `solve("neck")` usava distância rígida com o termo
+  `sqrt(L²−d²)`; quando a distância 2D ombro→nariz caía abaixo de 0,28 m, o nariz
+  "mergulhava" até ~0,19 m em UM frame — a cabeça ganhava yaw/pitch de ~30° sozinha.
+  Agora o nariz fica no plano do tórax (z do centro dos ombros).
+* **Orientação da cabeça pela linha dos olhos**: o vetor `nariz − ombros` mede posição,
+  não orientação — com o corpo se deslocando no quadro ele gira (medido: 40° de roll no
+  vídeo A com a cabeça parada; 28,9° no B). A direção da cabeça agora vem da **linha dos
+  olhos**, com suavização adaptativa (EMA com peso reduzido quando os olhos ficam curtos)
+  e guardas para frames degenerados (oclusão/perfil).
+* **Neutralização no MUNDO pelo frame 0**: a calibração anterior zerava só as rotações
+  locais; a contribuição da coluna sobrevivia como viés constante (24° de lado, medido).
+  Agora `calibrate_head` neutraliza Neck/Head também no mundo no frame de referência.
+
+### Medido (A/B, 60 frames)
+
+* A: tilt visível **40° → 0,71°** de amplitude (a linha dos olhos do vídeo mede 0,88°).
+* B: **40° → 10,4°** (concentrados no giro rápido; média 1,5°, std 2,2°); início em 0,00°.
+
+### Técnico
+
+* O teste de skinning do usuário passava **por causa do bug** (a cabeça balançava e o
+  cabelo é ~metade dos vértices); agora mede a fração de vértices de **membros** que se
+  movem — nova métrica `moved_fraction_limbs` no `tools/verify_glb_skinning.py`.
+* 107 testes passando.
+
+
 ## [1.4.7] — Calibração da cabeça pelo primeiro frame
 
 ### Corrigido

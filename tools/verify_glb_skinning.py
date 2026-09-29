@@ -208,6 +208,24 @@ def measure(path: str | Path, samples: int = 400) -> dict:
     else:
         rigidity = {"pairs": 0, "median_rel_change": 0.0, "frac_shape_preserved": 0.0}
 
+    # fracao de vertices de MEMBROS que se movem — metrica robusta ao fato de a
+    # cabeca ficar estavel de proposito (calibracao + linha dos olhos) e o cabelo
+    # ser uma fatia grande dos vertices. A saude do skinning se mede nos membros.
+    limb = np.zeros(len(pos_s), bool)
+    for i in range(len(pos_s)):
+        k = int(np.argmax(wgt_s[i]))
+        if wgt_s[i, k] <= 1e-6:
+            continue
+        j = int(jnt_s[i, k])
+        if 0 <= j < len(joints):
+            nome = (g.nodes[joints[j]].name or "").replace("mixamorig:", "")
+            if nome.startswith(("LeftArm", "RightArm", "LeftForeArm", "RightForeArm",
+                                "LeftHand", "RightHand",
+                                "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg",
+                                "LeftFoot", "RightFoot", "LeftToeBase", "RightToeBase")):
+                limb[i] = True
+    out["moved_fraction_limbs"] = float(((d > 0.01) & limb).sum() / max(int(limb.sum()), 1))
+
     out.update({
         "ok": True,
         "sampled": int(len(d)),

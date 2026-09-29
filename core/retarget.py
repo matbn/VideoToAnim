@@ -35,7 +35,8 @@ class Animation:
     meta: dict = field(default_factory=dict)
 
 
-def _derive_joint_positions(kp3d: np.ndarray) -> dict[str, np.ndarray]:
+def _derive_joint_positions(kp3d: np.ndarray,
+                            head_dir: np.ndarray | None = None) -> dict[str, np.ndarray]:
     """Posicoes (mundo) das juntas Mixamo derivadas do COCO-17 3D."""
     ci = COCO_INDEX
     left_hip = kp3d[ci["left_hip"]]
@@ -49,9 +50,14 @@ def _derive_joint_positions(kp3d: np.ndarray) -> dict[str, np.ndarray]:
     def lerp(a, b, t):
         return a + (b - a) * t
 
-    head_dir = nose - chest
-    nd = np.linalg.norm(head_dir)
-    head_dir = head_dir / nd if nd > 1e-9 else np.array([0.0, 1.0, 0.0])
+    if head_dir is None:
+        # fallback: direcao nariz->ombros (sensivel a translacao do corpo;
+        # a linha dos olhos e preferida quando disponivel — ver _face_up_from_eyes)
+        head_dir = nose - chest
+        nd = np.linalg.norm(head_dir)
+        head_dir = head_dir / nd if nd > 1e-9 else np.array([0.0, 1.0, 0.0])
+    else:
+        head_dir = np.asarray(head_dir, dtype=np.float64)
 
     j: dict[str, np.ndarray] = {
         "Hips": hips,
@@ -89,6 +95,47 @@ def _derive_joint_positions(kp3d: np.ndarray) -> dict[str, np.ndarray]:
 
 
 # osso -> (junta_pai, junta_filha) no dicionario derivado
+def _face_up_from_eyes(kp3d: np.ndarray, state: dict) -> np.ndarray | None:
+    """Direcao "para cima" do rosto, derivada da linha dos olhos (no plano).
+
+    A orientacao da cabeca NAO pode vir do vetor nariz-vs-ombros: ele muda
+    quando o corpo se desloca (agachamento/giro), mesmo com a cabeca parada.
+    A linha dos olhos (olhoE->olhoD) fornece a rotacao real do rosto e e
+    invariante a translacao. Guardas contra frames degenerados (oclusao):
+    se a distancia entre os olhos colapsar, mantem a ultima direcao valida.
+    """
+    ci = COCO_INDEX
+    v = np.asarray(kp3d[ci["right_eye"]], dtype=np.float64) - np.asarray(kp3d[ci["left_eye"]], dtype=np.float64)
+    v = v.copy()
+    v[2] = 0.0                      # a rotacao do rosto interessa no plano (x, y)
+    comp = float(np.linalg.norm(v[:2]))
+    if comp < 1e-9:
+        return state.get("up")
+    ema = state.get("len", 0.0)
+    if ema > 0.0 and comp < max(0.55 * ema, 0.012):
+        return state.get("up")      # olhos degenerados neste frame: segura o anterior
+    up = np.array([-v[1], v[0], 0.0], dtype=np.float64)
+    n = float(np.linalg.norm(up))
+    if n < 1e-9:
+        return state.get("up")
+    up = up / n
+    if up[1] < 0.0:                 # "para cima" e o lado com y>0 (y-up)
+        up = -up
+    prev = state.get("up")
+    if prev is not None:
+        # suavizacao adaptativa: a rotacao do rosto e de baixa frequencia
+        # (cabeca nao "sacode"); nos frames em que os olhos ficam curtos
+        # (perfil/oclusao) o peso da medicao nova cai
+        w = min(1.0, comp / max(ema, 1e-9)) if ema > 0.0 else 1.0
+        alpha = 0.30 * w
+        blended = (1.0 - alpha) * np.asarray(prev, dtype=np.float64) + alpha * up
+        nb = float(np.linalg.norm(blended))
+        up = blended / nb if nb > 1e-9 else up
+    state["up"] = up
+    state["len"] = comp if ema <= 0.0 else 0.9 * ema + 0.1 * comp
+    return up
+
+
 BONE_DIRECTION = {
     "Hips": ("Hips", "Spine1"),
     "Spine": ("Spine", "Spine1"),
@@ -141,16 +188,51 @@ def calibrate_head(anim: Animation, frame: int = 0,
             continue
         series = np.asarray(anim.rotations[key], np.float64)
         q_ref = mx.quat_normalize(series[f])
+
+        # 1) zera a rotacao LOCAL no frame de referencia
         inv = mx.quat_conj(q_ref)
         out = np.empty_like(series)
         for t in range(series.shape[0]):
             out[t] = mx.quat_normalize(mx.quat_mul(inv, series[t]))
+
+        # 2) neutraliza TAMBEM no MUNDO: a cadeia da coluna (Hips..Spine2)
+        # contribui com uma rotacao propria no frame de referencia; zerar so o
+        # local deixava um vies constante visivel (ex.: cabeca 24 graus de lado).
+        # Multiplica-se a serie por D (offset local constante) tal que a rotacao
+        # de MUNDO do osso no frame f vire identidade.
+        def _world_of(name: str, t: int) -> np.ndarray:
+            cadeia: list[str] = []
+            n: str | None = name
+            while n is not None:
+                cadeia.append(n)
+                n = mx.BONE_PARENT.get(n)
+            w = mx.quat_identity()
+            for nome2 in reversed(cadeia):
+                chave = nome2
+                if chave not in anim.rotations:
+                    for k2 in anim.rotations:
+                        if k2.replace("mixamorig:", "") == nome2:
+                            chave = k2
+                            break
+                    else:
+                        continue
+                w = mx.quat_mul(w, np.asarray(anim.rotations[chave][t], np.float64))
+            return w
+
+        pai = mx.BONE_PARENT.get(short)
+        w_pai = _world_of(pai, f) if pai else mx.quat_identity()
+        ql_f = mx.quat_normalize(out[f])
+        d_offset = mx.quat_mul(mx.quat_conj(ql_f), mx.quat_conj(w_pai))
+        for t in range(out.shape[0]):
+            out[t] = mx.quat_normalize(mx.quat_mul(out[t], d_offset))
         for t in range(1, out.shape[0]):   # continuidade de sinal por seguranca
             out[t] = mx.quat_sign_continuity(out[t - 1], out[t])
         anim.rotations[key] = out
         rep["bones"][short] = {
             "angle_deg": float(np.degrees(2.0 * np.arctan2(
                 float(np.linalg.norm(q_ref[:3])), abs(float(q_ref[3]))))),
+            "world_offset_deg": float(np.degrees(2.0 * np.arctan2(
+                float(np.linalg.norm(d_offset[:3])), abs(float(d_offset[3]))))),
         }
     rep["applied"] = bool(rep["bones"])
     return rep
@@ -179,6 +261,7 @@ class Retargeter:
         prev_root: np.ndarray | None = None
         max_ang = np.deg2rad(self.max_deg)
         last_valid: FramePose | None = None
+        face_state: dict = {"up": None, "len": 0.0}
 
         for t, frame in enumerate(frames):
             if frame.kp3d is None:
@@ -189,7 +272,7 @@ class Retargeter:
                 kp3d = frame.kp3d
                 last_valid = frame
 
-            joints = _derive_joint_positions(kp3d)
+            joints = _derive_joint_positions(kp3d, head_dir=_face_up_from_eyes(kp3d, face_state))
             root_pos = joints["Hips"].astype(np.float64)
             if prev_root is not None:
                 root_pos = prev_root + np.clip(root_pos - prev_root, -0.2, 0.2)

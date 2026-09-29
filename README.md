@@ -155,18 +155,26 @@ indicador e MCP do mindinho) e viram rotações locais dos ossos de dedo.
 o parâmetro `min_conf` (default 0,3) controla isso; no vídeo de teste, baixar para 0,2 fez a mão
 aparecer. Há também `upscale` no detector, para casos extremos.
 
-## Cabeça: calibração pelo frame 0
+## Cabeça: orientação estável (olhos + frame 0)
 
-O solver orienta pescoço/cabeça por um único vetor estimado (`nose - chest`) cuja
-profundidade vem do lifter monoculo — isso carregava um viés sistemático de dezenas de
-graus (o personagem "nascia" olhando para baixo/para o lado; medido: **55–75° de rotação
-no pescoço no frame 0** em jobs reais). O pipeline agora **ancora a cadeia pescoço/cabeça
-no primeiro frame**: a rotação local de `Neck`/`Head` no frame 0 vira a identidade (cabeça
-na orientação de repouso, olhando para a frente do corpo) e **todo o movimento relativo é
-preservado** (demonstrado por teste algébrico). Vale para todos os backends (a correção é
-no retarget, comum aos três). Controlável por `params.head_calibration` (default `true`) e
-`params.head_calibration_frame` (default `0`); o resultado aparece no log do job
-("Cabeca calibrada pelo frame 0: Neck 75.5 deg") e no `meta` do `anim.json`.
+Três fontes de instabilidade foram eliminadas no retarget da cabeça:
+
+1. **Profundidade do nariz**: o solver de distância rígida tinha singularidade perto do
+   limiar (`sqrt(L²−d²)`): quando a distância 2D ombro→nariz caía um pouco abaixo de
+   0,28 m, o nariz "mergulhava" até ~0,19 m **em um único frame** — a cabeça ganhava
+   yaw/pitch espúrios de ~30°. Agora o nariz fica no plano do tórax.
+2. **Orientação pelos olhos**: o vetor `nariz − ombros` mede posição, não orientação —
+   quando o corpo se desloca no quadro (agachar, girar), a cabeça girava junto (até 40°
+   de roll com o vídeo parado). A direção da cabeça agora vem da **linha dos olhos**
+   (invariante à translação), com suavização adaptativa e guardas para oclusão/perfil.
+3. **Neutralização no frame 0**: além de zerar as rotações locais de Neck/Head no frame
+   de referência, a calibração agora neutraliza também no MUNDO — a cabeça começa
+   exatamente na orientação de repouso (olhando para a frente).
+
+Medido (sword_swing A/B, 60 frames): tilt visível da cabeça de **40° → 0,7°** (A; o
+próprio vídeo mede 0,9°) e **40° → 10°** (B, concentrados no giro rápido; média 1,5°).
+Controlável por `params.head_calibration` (default `true`); o resultado aparece no log do
+job e no `meta` do `anim.json`.
 
 ## Idioma (PT/EN) e sincronismo de câmera
 

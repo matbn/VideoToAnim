@@ -54,7 +54,11 @@ def test_malha_fbx_do_usuario_defoma(tmp_path, registry, sample_video):
     r = measure(res["glb"]["path"])
     assert r["ok"], r
     assert r["deforms"], r
-    assert r["moved_fraction"] > 0.5, r
+    # A cabeca fica PARADA de proposito neste clipe (calibracao pelo frame 0 +
+    # orientacao pela linha dos olhos); e o cabelo e ~metade dos vertices, entao
+    # a fracao global cai — o que prova a saude do skinning e os MEMBROS moverem.
+    assert r["moved_fraction"] > 0.3, r
+    assert r["moved_fraction_limbs"] > 0.8, r
     assert r["unweighted"] == 0, r
     assert r["weights_normalized"], r
     assert r["bind_pose_ok"], r
