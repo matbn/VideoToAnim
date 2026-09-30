@@ -282,3 +282,23 @@ button.small { width: auto; padding: 7px 14px; }
 .lang-switch .lang-btn.active:hover { background: var(--accent); }
 .inline-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); cursor: pointer; padding: 6px 4px; user-select: none; }
 .inline-chk input { accent-color: var(--accent); margin: 0; }
+
+/* ---- debug: overlay do esqueleto 2D sobre o vídeo ----------------------- */
+.video-box { position: relative; }
+.video-box canvas.kp { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+/* US-04: tabela do historico cabe em viewports estreitas (colunas fixas +
+   acoes empilhadas); tooltips completos ficam no title (US-06) */
+@media (max-width: 640px) {
+  .hist-table { table-layout: fixed; }
+  .hist-table th:nth-child(1) { width: 64px; }
+  .hist-table th:nth-child(2) { width: 60px; }
+  .hist-table th:nth-child(3) { width: 108px; }
+  .hist-table th:nth-child(4) { width: 50px; }
+  .hist-table th:nth-child(5) { width: 56px; }
+  .hist-table th:nth-child(6) { width: 40px; }
+  .hist-table td { padding: 4px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist-table td.hist-actions { white-space: normal; overflow: visible; }
+  .hist-actions { gap: 2px; }
+  .hist-actions .ghost { padding: 1px 5px; font-size: 10px; }
+}

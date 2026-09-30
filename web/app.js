@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { t, applyStatic, langSwitcher, getLang } from './i18n.js';
+import { t, applyStatic, langSwitcher, getLang } from './i18n.js?v=5';
 
 const $ = (id) => document.getElementById(id);
 
@@ -28,7 +28,12 @@ let videoEl = null;
 let spanS = 0, videoReady = false;
 let playing = false;
 const viewers = [];
+let no3d = false;
 const backendsByName = {};
+
+// escapa texto para atributos HTML (US-06: tooltips com o valor completo)
+const attresc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 // categorias de licenca (espelham core/adapter.py LICENSE_CATEGORIES)
 const CAT_INFO = {
@@ -98,6 +103,7 @@ class Viewer {
       this.clear();
       this.model = gltf.scene;
       this.scene.add(this.model);
+      this._criarLabels();
 
       if (this.skeletonOnly) {
         // esconde a geometria e desenha o rig como linhas entre os ossos
@@ -124,6 +130,24 @@ class Viewer {
     }, undefined, (err) => console.error('erro ao carregar GLB', this.hostId, err));
   }
 
+  _criarLabels() {
+    this.labelSprites = [];
+    const filtro = /(Index|Middle|Ring|Pinky|Thumb)\d$/;
+    this.model.traverse((o) => {
+      if (o.isBone && !filtro.test(o.name)) {
+        const spr = makeTextSprite(o.name.replace(/^(?:mixamorig|mixamo)[:_]?/i, ''));
+        spr.position.set(0, 0.025, 0);
+        spr.visible = !!this._labelsOn;
+        o.add(spr);
+        this.labelSprites.push(spr);
+      }
+    });
+  }
+  setLabels(v) {
+    this._labelsOn = !!v;
+    (this.labelSprites || []).forEach((s) => { s.visible = this._labelsOn; });
+  }
+
   setTime(t) {
     if (this.mixer && this.clipDuration > 0) this.mixer.setTime(t);
   }
@@ -146,10 +170,143 @@ class Viewer {
   clear() {
     if (this.mixer) { this.mixer.stopAllAction(); this.mixer = null; }
     this.action = null;
+    (this.labelSprites || []).forEach((s) => {
+      if (s.material) { if (s.material.map) s.material.map.dispose(); s.material.dispose(); }
+    });
+    this.labelSprites = [];
     if (this.helper) { this.scene.remove(this.helper); this.helper = null; }
     if (this.model) { this.scene.remove(this.model); this.model = null; }
     this.ready = false;
   }
+}
+
+// ------------------------------------------- debug: overlay do esqueleto 2D
+const SKELETON_EDGES = [
+  [0, 1], [0, 2], [1, 3], [2, 4], [5, 7], [7, 9], [6, 8], [8, 10],
+  [5, 6], [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+];
+let kpData = null;
+let handsData = null;
+let kpOn = false;
+
+function kpFrameIndex() {
+  if (!kpData || !videoEl) return 0;
+  const fps = kpData.fps || 30;
+  const last = (kpData.frames || []).length - 1;
+  return Math.max(0, Math.min(last, Math.floor((videoEl.currentTime || 0) * fps)));
+}
+
+async function loadKp(id) {
+  kpData = null;
+  handsData = null;
+  const chk = $('kp-overlay');
+  if (chk) { chk.disabled = false; }
+  if (!id) { drawKpOverlay(); return; }
+  try {
+    const r = await fetch(`/api/jobs/${id}/artifacts/kp2d`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    kpData = await r.json();
+  } catch (e) {
+    kpData = null;
+    if (chk) chk.disabled = true;
+    const lab = chk && chk.closest('label');
+    if (lab) lab.title = t('ui.kpUnavailable');
+  }
+  if (id) {
+    try {
+      const rh = await fetch(`/api/jobs/${id}/artifacts/hands`);
+      handsData = rh.ok ? await rh.json() : null;
+    } catch (e) { handsData = null; }
+  }
+  drawKpOverlay();
+}
+
+function drawKpOverlay(idx) {
+  const cv = $('kp-canvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const w = cv.clientWidth, h = cv.clientHeight;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!kpOn || !kpData || !kpData.frames) return;
+  const fr = kpData.frames[idx === undefined ? kpFrameIndex() : idx];
+  if (!fr) return;
+  const vw = kpData.width || w, vh = kpData.height || h;
+  const s = Math.min(w / vw, h / vh);
+  const ox = (w - vw * s) / 2, oy = (h - vh * s) / 2;
+  const pt = (i) => [ox + fr[i][0] * s, oy + fr[i][1] * s];
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(95, 125, 106, .95)';
+  for (const [a, b2] of SKELETON_EDGES) {
+    if (!fr[a] || !fr[b2]) continue;
+    const [x1, y1] = pt(a), [x2, y2] = pt(b2);
+    ctx.globalAlpha = Math.min(1, 0.35 + 0.65 * Math.min(fr[a][2] || 0, fr[b2][2] || 1));
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  for (let i = 0; i < fr.length; i += 1) {
+    if (!fr[i]) continue;
+    const [x, y] = pt(i);
+    ctx.fillStyle = (fr[i][2] ?? 1) > 0.5 ? '#b06a48' : '#8a8175';
+    ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+  }
+  drawHandsOverlay(ctx, s, ox, oy, idx === undefined ? kpFrameIndex() : idx);
+}
+
+// ------------------------------- maos detectadas (hand tracking) sobre o video
+const HAND_EDGES = [
+  [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
+  [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15],
+  [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17],
+];
+
+function drawHandsOverlay(ctx, s, ox, oy, frameIdx) {
+  if (!handsData || !handsData.frames) return;
+  const hf = handsData.frames[frameIdx];
+  if (!hf) return;
+  const desenha = (lm, cor) => {
+    if (!lm) return;
+    ctx.strokeStyle = cor;
+    ctx.fillStyle = cor;
+    ctx.lineWidth = 1.6;
+    for (const par of HAND_EDGES) {
+      const p1 = lm[par[0]], p2 = lm[par[1]];
+      if (!p1 || !p2) continue;
+      ctx.beginPath();
+      ctx.moveTo(ox + p1[0] * s, oy + p1[1] * s);
+      ctx.lineTo(ox + p2[0] * s, oy + p2[1] * s);
+      ctx.stroke();
+    }
+    for (const p of lm) {
+      ctx.beginPath(); ctx.arc(ox + p[0] * s, oy + p[1] * s, 2, 0, Math.PI * 2); ctx.fill();
+    }
+  };
+  desenha(hf.left, '#3d6fa8');    // mao esquerda
+  desenha(hf.right, '#b06a48');   // mao direita
+}
+
+function makeTextSprite(texto) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = '600 30px Inter, system-ui, sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  const w = g.measureText(texto).width + 18;
+  g.fillStyle = 'rgba(251, 250, 247, .86)';
+  g.fillRect(128 - w / 2, 9, w, 46);
+  g.fillStyle = '#2b2a27';
+  g.fillText(texto, 128, 33);
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.set(0.22, 0.055, 1);
+  spr.renderOrder = 999;
+  return spr;
 }
 
 // ------------------------------------------------------------------ loop
@@ -174,10 +331,11 @@ function tick() {
       setTimelineUI((first.action.time % first.clipDuration) / first.clipDuration);
     }
   }
+  if (kpOn) drawKpOverlay();
   viewers.forEach((v) => v.render());
 }
 
-function onResizeAll() { viewers.forEach((v) => v.onResize()); }
+function onResizeAll() { viewers.forEach((v) => v.onResize()); drawKpOverlay(); }
 
 function setCameraAll(name) { viewers.forEach((v) => v.setCamera(name)); }
 
@@ -215,9 +373,9 @@ async function loadHistory() {
       ? d.toLocaleString(getLang() === 'pt' ? 'pt-BR' : 'en-US', { dateStyle: 'short', timeStyle: 'short' }) : '—';
     const ok = j.status === 'done';
     return `<tr data-id="${j.id}" class="hist-row ${j.status}">
-      <td class="mono">${j.id.slice(0, 8)}</td>
+      <td class="mono" title="${attresc(j.id)}">${j.id.slice(0, 8)}</td>
       <td>${when}</td>
-      <td>${(j.video_name || '').slice(0, 22)}</td>
+      <td title="${attresc(j.video_name)}">${(j.video_name || '').slice(0, 22)}</td>
       <td>${j.backend}</td>
       <td><span class="status-${j.status}">${stLabel(j.status)}</span></td>
       <td>${(j.metrics && j.metrics.frames) ? j.metrics.frames : '—'}</td>
@@ -275,16 +433,19 @@ function openJobResult(job) {
   $('title-skel').textContent = t('viewer.skel');
   $('title-mesh').textContent = hasMesh
     ? t('viewer.meshNamed') : t('viewer.skel2');
-  viewers[1].skeletonOnly = !hasMesh;
-  viewers.forEach((v) => v.clear());
-  if (done) {
-    viewers[0].load(`/api/jobs/${jobId}/artifacts/glb`);
-    viewers[1].load(`/api/jobs/${jobId}/artifacts/glb`);
+  if (!no3d) {
+    viewers[1].skeletonOnly = !hasMesh;
+    viewers.forEach((v) => v.clear());
+    if (done) {
+      viewers[0].load(`/api/jobs/${jobId}/artifacts/glb`);
+      viewers[1].load(`/api/jobs/${jobId}/artifacts/glb`);
+    }
   }
   spanS = (job.metrics && job.metrics.video_span_s) || 0;
   videoEl.src = `/api/jobs/${jobId}/artifacts/video`;
   videoEl.load();
   $('video-empty').style.display = 'none';
+  loadKp(jobId);
   const note = $('hist-note');
   if (note) note.textContent = t('note.reopened', { id: jobId });
 }
@@ -332,7 +493,16 @@ function stLabel(s) {
 }
 
 async function loadBackends() {
-  const data = await (await fetch('/api/backends')).json();  const sel = $('backend');
+  const sel = $('backend');
+  const health = $('health');
+  if (health) health.textContent = t('be.loading');   // US-03: estado visivel na sondagem
+  if (sel) sel.disabled = true;
+  let data;
+  try {
+    data = await (await fetch('/api/backends')).json();
+  } finally {
+    if (sel) sel.disabled = false;
+  }
   sel.innerHTML = '';
   for (const b of data.backends) {
     backendsByName[b.name] = b;
@@ -485,6 +655,7 @@ async function checkMesh() {
   try {
     const fd = new FormData();
     fd.append('mesh', f);
+    fd.append('lang', getLang());
     const r = await fetch('/api/mesh/inspect', { method: 'POST', body: fd });
     renderMeshInspect(await r.json());
   } catch (err) {
@@ -534,10 +705,12 @@ async function submitJob() {
   // camada de refino (filtro escolhido + constraints articulares)
   const rf = $('refine-filter') ? $('refine-filter').value : '';
   const rc = $('refine-constraints') ? $('refine-constraints').value === '1' : false;
-  if (rf || rc) {
+  const rcol = $('use-collision') ? $('use-collision').checked : true;
+  if (rf || rc || rcol) {
     params.refine = {};
     if (rf) params.refine.filters = { apply_to_translation: true, filters: [{ name: rf }] };
     if (rc) params.refine.constraints = true;
+    if (rcol) params.refine.collision = true;   // US-07
   }
   if ($('hands') && $('hands').checked) {
     params.hands = { enabled: true, num_hands: 2, mirror: true };
@@ -547,6 +720,7 @@ async function submitJob() {
   fd.append('video', file);
   fd.append('backend', $('backend').value);
   fd.append('params', JSON.stringify(params));
+  fd.append('lang', getLang());
   const mesh = $('mesh').files[0];
   if (mesh) fd.append('mesh', mesh);
 
@@ -665,6 +839,7 @@ function togglePlay() {
 function resetViewer() {
   if (videoEl) { videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load(); }
   videoReady = false; spanS = 0; setPlaying(false);
+  kpData = null;
   viewers.forEach((v) => { v.clear(); $(v.emptyId).style.display = ''; });
   $('video-empty').style.display = '';
   $('sync-note').textContent = t('hint.timeline');
@@ -684,6 +859,19 @@ function seek(value) {
   setTimelineUI(p);
 }
 
+// 3D indisponivel: degrada com mensagem e mantem o resto da interface viva (US-01)
+function showNo3D() {
+  for (const id of ['empty-skel', 'empty-mesh']) {
+    const el = $(id);
+    if (el) { el.style.display = ''; el.textContent = t('viewer.no3d'); }
+  }
+  document.querySelectorAll('[data-cam]').forEach((b) => { b.disabled = true; });
+  for (const id of ['sync-rot', 'bone-labels']) {
+    const el = $(id);
+    if (el) { el.disabled = true; el.checked = false; }
+  }
+}
+
 // ------------------------------------------------------------------ wire
 window.addEventListener('DOMContentLoaded', () => {
   clock = new THREE.Clock();
@@ -695,11 +883,18 @@ window.addEventListener('DOMContentLoaded', () => {
   videoEl.addEventListener('play', () => setPlaying(true));
   videoEl.addEventListener('ended', () => setPlaying(false));
 
-  viewers.push(new Viewer('canvas-skel', 'empty-skel', { skeletonOnly: true }));
-  viewers.push(new Viewer('canvas-mesh', 'empty-mesh'));
+  try {
+    viewers.push(new Viewer('canvas-skel', 'empty-skel', { skeletonOnly: true }));
+    viewers.push(new Viewer('canvas-mesh', 'empty-mesh'));
+  } catch (err) {
+    console.error('falha ao iniciar o 3D (WebGL):', err);
+    viewers.length = 0;
+    no3d = true;
+  }
   applyStatic();
   langSwitcher('lang-switch');
   ligarSyncRot();
+  if (no3d) showNo3D();
 
   switchTab('new');
   loadHistory();
@@ -723,6 +918,14 @@ window.addEventListener('DOMContentLoaded', () => {
   $('timeline').addEventListener('input', (e) => seek(e.target.value));
   document.querySelectorAll('[data-cam]').forEach((b) =>
     b.addEventListener('click', () => setCameraAll(b.dataset.cam)));
+  $('kp-overlay').addEventListener('change', () => {
+    kpOn = $('kp-overlay').checked;
+    drawKpOverlay();
+  });
+  $('bone-labels').addEventListener('change', () => {
+    const on = $('bone-labels').checked;
+    viewers.forEach((v) => v.setLabels(on));
+  });
   window.addEventListener('resize', onResizeAll);
   rendererLoopStart();
 });

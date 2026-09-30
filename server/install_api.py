@@ -63,6 +63,12 @@ def start_install(backend: str, force: bool = False) -> dict:
             st["report"] = rep
             st["status"] = "done" if rep["ok"] else "error"
             _log(backend, f"concluido: ok={rep['ok']} disponivel={rep['available_after']}")
+            try:  # US-03: invalida o cache de /api/backends apos instalar
+                from server import app as _appmod
+
+                _appmod._BACKENDS_CACHE.clear()
+            except Exception:
+                pass
         except Exception as exc:  # noqa: BLE001
             st["status"] = "error"
             st["report"] = {"ok": False, "error": str(exc)}

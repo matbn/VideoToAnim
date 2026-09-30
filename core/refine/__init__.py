@@ -19,17 +19,19 @@ from pathlib import Path
 from core.refine import filters, plan as filter_plan
 from core.refine import boneedit as boneedit_mod
 from core.refine import constraints as constraints_mod
+from core.refine import collision as collision_mod
 from core.refine import report as report_mod
 
 __all__ = [
     "refine_animation", "RefineReport", "filters", "filter_plan",
-    "constraints_mod", "boneedit_mod", "report_mod",
+    "constraints_mod", "collision_mod", "boneedit_mod", "report_mod",
 ]
 
 
 @dataclass
 class RefineReport:
     constraints: dict | None = None
+    collision: dict | None = None
     filters: dict | None = None
     edits: list[dict] = field(default_factory=list)
     stages: list[str] = field(default_factory=list)
@@ -38,6 +40,7 @@ class RefineReport:
         return {
             "stages": self.stages,
             "constraints": self.constraints,
+            "collision": self.collision,
             "filters": self.filters,
             "edits": self.edits,
         }
@@ -47,10 +50,15 @@ def refine_animation(
     anim,
     *,
     constraints_config: str | Path | dict | None = None,
+    collision_config: str | Path | dict | None = None,
+    collision_mesh_lengths: dict | None = None,
+    collision_skeleton_offsets: dict | None = None,
     filters_config: str | Path | dict | None = None,
     edits: list | None = None,
+    side_history: dict[str, float] | None = None,
     history=None,
     apply_constraints_stage: bool = True,
+    apply_collision_stage: bool = True,
     apply_filter_stage: bool = True,
     apply_edit_stage: bool = True,
 ):
@@ -72,6 +80,24 @@ def refine_animation(
         cur, c_report = constraints_mod.apply_constraints(cur, preset)
         rep.constraints = c_report
         rep.stages.append("constraints")
+
+    # 1b. anticolisao -----------------------------------------------------
+    if apply_collision_stage and collision_config is not None:
+        if isinstance(collision_config, collision_mod.CollisionConfig):
+            ccol = collision_config
+        elif isinstance(collision_config, dict):
+            ccol = collision_mod.CollisionConfig.from_dict(collision_config)
+        else:
+            ccol = collision_mod.load_default_config(collision_config)
+        errs = ccol.validate()
+        if errs:
+            raise ValueError("config de anticolisao invalida:\n  - " + "\n  - ".join(errs))
+        cur, col_report = collision_mod.apply_collision(
+            cur, config=ccol, mesh_lengths=collision_mesh_lengths,
+            skeleton_offsets=collision_skeleton_offsets,
+            side_history=side_history)
+        rep.collision = col_report
+        rep.stages.append("collision")
 
     # 2. filtros ---------------------------------------------------------
     if apply_filter_stage and filters_config is not None:

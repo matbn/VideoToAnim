@@ -1,64 +1,57 @@
-# Matriz de licenças
+# License matrix
 
-Este projeto é pensado para distribuição pública, então cada backend de pose traz uma **categoria de
-licença** visível no dropdown e na API (`GET /api/backends`). A categoria não esconde o backend — ela
-informa o que você pode ou não fazer.
+## Português
 
-| categoria | significado |
+Este documento também está disponível em português: [LICENSING.pt-BR.md](LICENSING.pt-BR.md).
+
+This project is designed for public distribution, so every pose backend carries a **license category** visible in the dropdown and in the API (`GET /api/backends`). The category does not hide the backend — it tells you what you may or may not do. (The category identifiers are in Portuguese: `livre` = free, `nao_comercial` = non-commercial, `licenca_a_parte` = separate license.)
+
+| category | meaning |
 |---|---|
-| **`livre`** | uso comercial permitido (MIT / Apache-2.0 / BSD) |
-| **`nao_comercial`** | só pesquisa / uso acadêmico não comercial |
-| **`licenca_a_parte`** | copyleft (ex.: AGPL), share-alike ou termos próprios — exige avaliação/negociação |
+| **`livre`** | commercial use allowed (MIT / Apache-2.0 / BSD) |
+| **`nao_comercial`** | research / non-commercial academic use only |
+| **`licenca_a_parte`** | copyleft (e.g., AGPL), share-alike or custom terms — requires assessment/negotiation |
 
-## Os 11 backends
+## The 11 backends
 
-| backend | categoria | código | pesos / modelo | observação |
+| backend | category | code | weights / model | note |
 |---|---|---|---|---|
-| `vitpose` (padrão) | **livre** | Apache-2.0 (ViTPose/OpenMMLab) | Apache-2.0 (`onnx-community/vitpose-base-simple`) | roda em CPU via ONNX Runtime |
-| `mediapipe` | **livre** | Apache-2.0 (Google) | Apache-2.0 (modelo `pose_landmarker.task`) | CPU |
-| `rtmpose` | **livre** | Apache-2.0 (RTMPose/OpenMMLab) | Apache-2.0 (ONNX oficial via `rtmlib`) | CPU; `rtmlib` é MIT |
-| `motionbert` | **livre** | Apache-2.0 | Apache-2.0 (`walterzhu/MotionBERT`) | requer torch |
-| `yolopose` | **licença à parte** | **AGPL-3.0** (Ultralytics) | AGPL-3.0 | copyleft: distribuir exige abrir o código ou licença Enterprise |
-| `sam3dbody` | **licença à parte** | SAM License (Meta) | SAM License | permissiva para uso comercial, porém **share-alike** + restrições de export/militar |
-| `mhformer` | **licença à parte** | MIT | **sem licença declarada** | o código é livre; os pesos vêm sem licença (all rights reserved) |
-| `wham` | **não comercial** | MIT | **SMPL (Max Planck) — non-commercial** | o código é livre; o corpo SMPL que ele usa não é |
-| `openpose` | **não comercial** | non-commercial (CMU) | non-commercial | LICENSE literal: *"ACADEMIC OR NON-PROFIT ORGANIZATION NONCOMMERCIAL RESEARCH USE ONLY"* |
-| `simplebaseline` | **não comercial** | MIT | **"for research purpose"** | o código é MIT; os pesos são declarados só para pesquisa |
-| `synthetic` | **livre** (oculto) | MIT (deste projeto) | — | infra de teste; não aparece no dropdown |
+| `vitpose` (default) | **`livre`** | Apache-2.0 (ViTPose/OpenMMLab) | Apache-2.0 (`onnx-community/vitpose-base-simple`) | runs on CPU via ONNX Runtime |
+| `mediapipe` | **`livre`** | Apache-2.0 (Google) | Apache-2.0 (`pose_landmarker.task` model) | CPU |
+| `rtmpose` | **`livre`** | Apache-2.0 (RTMPose/OpenMMLab) | Apache-2.0 (official ONNX via `rtmlib`) | CPU; `rtmlib` is MIT |
+| `motionbert` | **`livre`** | Apache-2.0 | Apache-2.0 (`walterzhu/MotionBERT`) | requires torch |
+| `yolopose` | **`licenca_a_parte`** | **AGPL-3.0** (Ultralytics) | AGPL-3.0 | copyleft: distributing requires open-sourcing or an Enterprise license |
+| `sam3dbody` | **`licenca_a_parte`** | SAM License (Meta) | SAM License | permissive for commercial use, but **share-alike** + export/military restrictions |
+| `mhformer` | **`licenca_a_parte`** | MIT | **no declared license** | the code is free; the weights come with no license (all rights reserved) |
+| `wham` | **`nao_comercial`** | MIT | **SMPL (Max Planck) — non-commercial** | the code is free; the SMPL body it uses is not |
+| `openpose` | **`nao_comercial`** | non-commercial (CMU) | non-commercial | LICENSE verbatim: *"ACADEMIC OR NON-PROFIT ORGANIZATION NONCOMMERCIAL RESEARCH USE ONLY"* |
+| `simplebaseline` | **`nao_comercial`** | MIT | **"for research purpose"** | the code is MIT; the weights are declared for research only |
+| `synthetic` | **`livre`** (hidden) | MIT (this project) | — | test infra; does not appear in the dropdown |
 
-> **Serviço auxiliar:** o `rtmlib` (usado pelo `rtmpose`) é MIT, e o `onnxruntime` é MIT.
+> **Auxiliary service:** `rtmlib` (used by `rtmpose`) is MIT, and `onnxruntime` is MIT.
 
-## Como ler isso na prática
+## How to read this in practice
 
-- Quer **lançar um produto fechado**? Use apenas a coluna `livre` — os quatro primeiros.
-- **Pesquisa**? Tudo é utilizável; só respeite as citações.
-- Quer `yolopose` ou `sam3dbody` num produto? Leia a licença antes: AGPL exige abrir o código (ou
-  comprar licença da Ultralytics); a SAM License permite uso comercial mas propaga os termos.
-- `openpose`, `simplebaseline` e `wham` **não** podem ir para um produto comercial como estão.
+- Want to **ship a closed product**? Use only the `livre` column — the first four.
+- **Research**? Everything is usable; just respect the citations.
+- Want `yolopose` or `sam3dbody` in a product? Read the license first: AGPL requires open-sourcing (or buying an Ultralytics license); the SAM License allows commercial use but propagates its terms.
+- `openpose`, `simplebaseline` and `wham` **cannot** go into a commercial product as they are.
 
-## Detalhes que costumam enganar
+## Details that often mislead
 
-1. **Código livre ≠ pesos livres.** É o caso de `mhformer` (MIT + pesos sem licença) e
-   `simplebaseline` (MIT + pesos "research purpose"). Sempre verifique o *checkpoint*, não só o repo.
-2. **Modelos de corpo (SMPL/SMPL-X)** exigem licença da Max Planck e são **não comerciais** — é o que
-   coloca o `wham` na categoria não comercial, mesmo com código MIT.
-3. **AGPL é copyleft forte**: usar o `yolopose` num serviço de rede obriga a disponibilizar o código,
-   salvo licença comercial.
-4. **Este projeto não empacota pesos.** Cada backend baixa o que precisa na primeira execução (e
-   registra o que baixou), para que a licença de cada artefato fique explícita.
+1. **Free code ≠ free weights.** This is the case for `mhformer` (MIT + weights with no license) and `simplebaseline` (MIT + "research purpose" weights). Always check the *checkpoint*, not just the repo.
+2. **Body models (SMPL/SMPL-X)** require a Max Planck license and are **non-commercial** — that is what puts `wham` in the non-commercial category, even with MIT code.
+3. **AGPL is strong copyleft**: using `yolopose` in a network service requires making the code available, unless under a commercial license.
+4. **This project does not bundle weights.** Each backend downloads what it needs on first run (and records what it downloaded), so the license of each artifact stays explicit.
 
-## Onde isso aparece no código
+## Where this appears in the code
 
-- `core/adapter.py` → `LICENSE_CATEGORIES` e o campo `license_category` da `AdapterConfig`.
-- `core/registry.py` → `BackendRecord.license_category` / `license` e `by_license_category()`.
-- `GET /api/backends` → devolve `license_category` e `license` por backend.
-- A interface mostra a categoria no dropdown (cor por categoria) e no painel do job.
-- Testes: `tests/test_adapter_contract.py::test_categorias_de_licenca` garante que todo backend
-  registrado tem categoria válida e descrição de licença.
+- `core/adapter.py` → `LICENSE_CATEGORIES` and the `license_category` field of `AdapterConfig`.
+- `core/registry.py` → `BackendRecord.license_category` / `license` and `by_license_category()`.
+- `GET /api/backends` → returns `license_category` and `license` per backend.
+- The interface shows the category in the dropdown (color per category) and in the job panel.
+- Tests: `tests/test_adapter_contract.py::test_categorias_de_licenca` guarantees every registered backend has a valid category and license description.
 
-## Rastreabilidade (fontes primárias)
+## Traceability (primary sources)
 
-As categorizações seguem as licenças lidas nos repositórios oficiais: `CMU-Perceptual-Computing-Lab/openpose`
-(LICENSE), `microsoft/human-pose-estimation.pytorch` (README), `Vegetebird/MHFormer` (README),
-`Walter0807/MotionBERT`, `ultralytics/ultralytics`, `facebookresearch/sam-3d-body`,
-`yohanshin/WHAM`, ViTPose/MMPose e MediaPipe. Se alguma mudar, a categoria deve ser revista junto.
+The categorizations follow the licenses read in the official repositories: `CMU-Perceptual-Computing-Lab/openpose` (LICENSE), `microsoft/human-pose-estimation.pytorch` (README), `Vegetebird/MHFormer` (README), `Walter0807/MotionBERT`, `ultralytics/ultralytics`, `facebookresearch/sam-3d-body`, `yohanshin/WHAM`, ViTPose/MMPose and MediaPipe. If any of them changes, the category must be reviewed along.

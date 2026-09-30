@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from core.refine import boneedit_mod as be
+from core.refine import collision as collision_mod
 from core.refine import constraints as cons
 from core.refine import filter_plan, io as rio, report as rep_mod
 from core.refine.filters import FILTERS
@@ -65,8 +66,77 @@ def _job_skin_mesh(job_id: str):
         mesh = None
     _MESH_CACHE[job_id] = mesh
     return mesh
+
+
+_MESH_LEN_CACHE: dict[str, dict | None] = {}
+
+
+def _job_mesh_lengths(job_id: str) -> dict | None:
+    """Comprimentos dos ossos do esqueleto DA MALHA do job (anticolisao).
+
+    O rig do Mixamo tem formato padrao mas cada malha tem tamanhos proprios;
+    a anticolisao re-detecta aqui, a cada execucao. None quando nao ha malha
+    anexa ou o formato nao permite leitura.
+    """
+    try:
+        cand = sorted(_job_dir(job_id).glob("mesh.*"))
+    except Exception:  # noqa: BLE001
+        return None
+    if not cand:
+        return None
+    key = f"{job_id}:{cand[0].stat().st_mtime_ns}"  # trocar a malha re-detecta
+    if key in _MESH_LEN_CACHE:
+        return _MESH_LEN_CACHE[key]
+    out = None
+    try:
+        from core.mesh import mesh_bone_lengths
+
+        out = mesh_bone_lengths(cand[0]) or None
+    except Exception:  # noqa: BLE001
+        out = None
+    _MESH_LEN_CACHE[key] = out
+    return out
+
+
+_MESH_RIG_CACHE: dict[str, dict | None] = {}
+
+
+def _job_mesh_rig(job_id: str) -> dict | None:
+    """Esqueleto de rest DA MALHA do job (pivos proprios p/ exportacao)."""
+    try:
+        cand = sorted(_job_dir(job_id).glob("mesh.*"))
+    except Exception:  # noqa: BLE001
+        return None
+    if not cand:
+        return None
+    key = f"{job_id}:{cand[0].stat().st_mtime_ns}"
+    if key in _MESH_RIG_CACHE:
+        return _MESH_RIG_CACHE[key]
+    out = None
+    try:
+        from core.mesh import mesh_skeleton
+
+        rig = mesh_skeleton(cand[0])
+        if rig and rig.get("ok"):
+            out = rig
+    except Exception:  # noqa: BLE001
+        out = None
+    _MESH_RIG_CACHE[key] = out
+    return out
+
+
+def _job_mesh_rig_offsets(job_id: str) -> dict | None:
+    """Offsets de mundo por osso do esqueleto da malha (anticolisao)."""
+    rig = _job_mesh_rig(job_id)
+    if not rig:
+        return None
+    return {b: np.asarray(v["world_offset"], np.float64)
+            for b, v in rig["bones"].items()}
+
+
 CONSTRAINTS_PATH = Path(__file__).resolve().parents[1] / "config" / "constraints_humanoid.yaml"
 FILTERS_PATH = Path(__file__).resolve().parents[1] / "config" / "filters_default.yaml"
+COLLISION_PATH = Path(__file__).resolve().parents[1] / "config" / "collision_default.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +207,13 @@ def get_plan() -> dict:
 def get_constraints() -> dict:
     preset = cons.load_default_preset(CONSTRAINTS_PATH)
     return {"path": str(CONSTRAINTS_PATH), "preset": preset.to_dict()}
+
+
+@router.get("/collision")
+def get_collision() -> dict:
+    """Configuracao padrao da anticolisao (pares, raios, limites)."""
+    cfg = collision_mod.load_default_config(COLLISION_PATH)
+    return {"path": str(COLLISION_PATH), "config": cfg.to_dict()}
 
 
 class PresetBody(BaseModel):
@@ -270,6 +347,7 @@ def post_compare(job_id: str, body: CompareBody | None = None) -> dict:
 class ApplyBody(BaseModel):
     use_filters: bool = True
     use_constraints: bool = True
+    use_collision: bool = True
     filters: list[str] | None = None      # quais filtros usar (default: o plano do arquivo)
 
 
@@ -287,20 +365,27 @@ def post_apply(job_id: str, body: ApplyBody | None = None) -> dict:
         elif FILTERS_PATH.exists():
             fcfg = filter_plan.FilterPlan.load(FILTERS_PATH)
     ccfg = CONSTRAINTS_PATH if body.use_constraints else None
-    refined, rep = refine_animation(anim, constraints_config=ccfg, filters_config=fcfg)
+    colcfg = COLLISION_PATH if body.use_collision else None
+    colmesh = _job_mesh_lengths(job_id) if body.use_collision else None
+    coloffs = _job_mesh_rig_offsets(job_id) if body.use_collision else None
+    refined, rep = refine_animation(anim, constraints_config=ccfg, filters_config=fcfg,
+                                    collision_config=colcfg, collision_mesh_lengths=colmesh,
+                                    collision_skeleton_offsets=coloffs)
 
     job_dir = _job_dir(job_id)
     glb = rio.export_animation_glb(refined, job_dir / "model_refined.glb",
-                                   skin_mesh=_job_skin_mesh(job_id))
+                                   skin_mesh=_job_skin_mesh(job_id),
+                                   rig=_job_mesh_rig(job_id))
     fbx = rio.export_animation_fbx(refined, job_dir / "model_refined.fbx")
     rio.save_animation(refined, job_dir / "anim_refined.json")
     payload = rep_mod.save_report(STORAGE / "refine" / job_id, constraints=rep.constraints,
-                                  extra={"filters": rep.filters, "stages": rep.stages,
-                                         "comparison": None})
+                                  extra={"filters": rep.filters, "collision": rep.collision,
+                                         "stages": rep.stages, "comparison": None})
     store.set_artifact(job_id, "glb_refined", str(glb["path"]), glb["bytes"])
     store.set_artifact(job_id, "fbx_refined", str(fbx["path"]), fbx["bytes"])
     return {"glb": glb, "fbx": fbx, "stages": rep.stages,
-            "constraints": rep.constraints, "filters": rep.filters, "report": payload}
+            "constraints": rep.constraints, "collision": rep.collision,
+            "filters": rep.filters, "report": payload}
 
 @router.get("/animation/{job_id}/glb")
 def get_current_glb(job_id: str):
@@ -310,5 +395,6 @@ def get_current_glb(job_id: str):
     anim, _ = _load_current(job_id)
     out = REFINE_DIR / job_id / "current.glb"
     out.parent.mkdir(parents=True, exist_ok=True)
-    rio.export_animation_glb(anim, out, skin_mesh=_job_skin_mesh(job_id))
+    rio.export_animation_glb(anim, out, skin_mesh=_job_skin_mesh(job_id),
+                             rig=_job_mesh_rig(job_id))
     return FileResponse(out, media_type="model/gltf-binary", filename=f"{job_id}_edited.glb")

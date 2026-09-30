@@ -83,9 +83,80 @@ def _cylinder(a: np.ndarray, b: np.ndarray, radius: float):
     return np.asarray(verts, dtype=np.float32), np.asarray(idx, dtype=np.int64)
 
 
+def _rig_ok(rig):
+    """Valida um dict de mesh_skeleton; None se incompleto."""
+    if not rig or not isinstance(rig, dict) or not rig.get("ok"):
+        return None
+    bones = rig.get("bones") or {}
+    for b in mx.BONE_NAMES:
+        e = bones.get(b)
+        if not e or not all(k in e for k in
+                            ("translation", "rotation", "world_pos", "world_rot")):
+            return None
+    return rig
+
+
+def _rig_world_pos(rig):
+    return {b: np.asarray(rig["bones"][b]["world_pos"], np.float64) for b in mx.BONE_NAMES}
+
+
+def _rig_world_rot(rig):
+    return {b: np.asarray(rig["bones"][b]["world_rot"], np.float64) for b in mx.BONE_NAMES}
+
+
+def _rig_locals(rig, field):
+    return {b: np.asarray(rig["bones"][b][field], np.float64) for b in mx.BONE_NAMES}
+
+
+def _qmul_series(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """quat_mul de um quat fixo (4,) com uma serie (T,4) - em qualquer lado."""
+    aa = np.asarray(a, np.float64)
+    bb = np.asarray(b, np.float64)
+    if aa.ndim == 1:
+        ax, ay, az, aw = aa[0], aa[1], aa[2], aa[3]
+        bx, by, bz, bw = bb[:, 0], bb[:, 1], bb[:, 2], bb[:, 3]
+    else:
+        ax, ay, az, aw = aa[:, 0], aa[:, 1], aa[:, 2], aa[:, 3]
+        bx, by, bz, bw = bb[0], bb[1], bb[2], bb[3]
+    return np.stack([
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ], axis=1)
+
+
+def _convert_local_series(q_series: np.ndarray, bone: str,
+                          loc_rot: dict, world_rot: dict) -> np.ndarray:
+    """Converte rotacoes locais do NOSSO rig -> rig da malha (pivos proprios).
+
+    Rotacao do node B (glTF, frame do pai em rest):
+        R(B) = conj(Wr(pai)) * q(B) * Wr(pai) * S(B)
+    com Wr = rotacao de rest em mundo e S(B) = rotacao local de rest do
+    proprio osso (para o root/Hips: R = q * S).
+    """
+    parent = mx.BONE_PARENT[bone]
+    s_b = loc_rot[bone]
+    if parent is None:
+        r = _qmul_series(q_series, s_b)
+    else:
+        wp = world_rot[parent]
+        r = _qmul_series(q_series, wp)
+        r = _qmul_series(mx.quat_conj(wp), r)
+        r = _qmul_series(r, s_b)
+    n = np.linalg.norm(r, axis=1, keepdims=True)
+    return r / np.where(n < 1e-12, 1.0, n)
+
+
 def build_glb(anim: Animation, out_path: str | Path, radius: float = 0.022,
-              skin_mesh: dict | None = None) -> dict:
+              skin_mesh: dict | None = None, rig: dict | None = None) -> dict:
+    rig = _rig_ok(rig)
     rest_pos = mx.rest_world_positions()
+    if rig is not None:
+        rest_pos = _rig_world_pos(rig)
+        world_rot = _rig_world_rot(rig)
+        loc_tr = _rig_locals(rig, "translation")
+        loc_rot = _rig_locals(rig, "rotation")
     bones = mx.BONE_NAMES
     n_bones = len(bones)
     T = anim.num_frames
@@ -95,9 +166,15 @@ def build_glb(anim: Animation, out_path: str | Path, radius: float = 0.022,
     # ---- IBM (inverse bind matrices) -------------------------------------
     ibm = np.zeros((n_bones, 16), np.float64)
     for i, name in enumerate(bones):
-        m = np.eye(4)
-        m[:3, 3] = -rest_pos[name]
-        ibm[i] = m.reshape(4, 4).T.reshape(-1)  # column-major
+        if rig is None:
+            inv = np.eye(4)
+            inv[:3, 3] = -rest_pos[name]
+        else:
+            w = np.eye(4)
+            w[:3, :3] = mx.quat_to_matrix(world_rot[name])
+            w[:3, 3] = rest_pos[name]
+            inv = np.linalg.inv(w)
+        ibm[i] = inv.T.reshape(-1)  # column-major
     ibm_view = b.add_view(np.ascontiguousarray(ibm.astype(np.float32)).tobytes())
     ibm_acc = b.add_accessor(ibm_view, FLOAT, n_bones, "MAT4")
 
@@ -158,9 +235,12 @@ def build_glb(anim: Animation, out_path: str | Path, radius: float = 0.022,
     samplers = []
     # rotacoes
     for bone in mx.ANIMATED_BONES:
-        rots = anim.rotations[bone].astype(np.float32)
+        rots = np.asarray(anim.rotations[bone], np.float64)
         n = np.linalg.norm(rots, axis=1, keepdims=True)
         rots = rots / np.where(n < 1e-9, 1.0, n)
+        if rig is not None:
+            rots = _convert_local_series(rots, bone, loc_rot, world_rot)
+        rots = rots.astype(np.float32)
         view = b.add_view(rots.tobytes())
         acc = b.add_accessor(view, FLOAT, T, "VEC4")
         samplers.append({"input": time_acc, "interpolation": "LINEAR", "output": acc})
@@ -177,11 +257,13 @@ def build_glb(anim: Animation, out_path: str | Path, radius: float = 0.022,
     mesh_node = n_bones
     nodes = []
     for name in bones:
-        node = {
-            "name": mx.PREFIX + name,
-            "translation": [float(x) for x in mx.BONE_OFFSET[name]],
-            "rotation": [0.0, 0.0, 0.0, 1.0],
-        }
+        if rig is None:
+            tr = [float(x) for x in mx.BONE_OFFSET[name]]
+            ro = [0.0, 0.0, 0.0, 1.0]
+        else:
+            tr = [float(x) for x in loc_tr[name]]
+            ro = [float(x) for x in loc_rot[name]]
+        node = {"name": mx.PREFIX + name, "translation": tr, "rotation": ro}
         kids = [mx.BONE_INDEX[k] for k in mx._CHILDREN.get(name, [])]
         if kids:
             node["children"] = kids
@@ -227,6 +309,8 @@ def build_glb(anim: Animation, out_path: str | Path, radius: float = 0.022,
         "vertices": int(verts.shape[0]),
         "channels": len(channels),
         "mesh": mesh_kind,
+        "rig": "mesh" if rig is not None else "reference",
+        "rig_source": (rig or {}).get("source", "") if rig is not None else "",
     }
 
 

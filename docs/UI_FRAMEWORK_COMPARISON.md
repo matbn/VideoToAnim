@@ -1,64 +1,68 @@
-# Comparativo de frameworks de UI web local
+# Comparison of local web UI frameworks
 
-Critérios derivados dos requisitos do produto: dropdown de backend alimentado por registro de
-plugins; upload de vídeo; painel de status de job persistente; **preview 3D com play/pause,
-timeline (scrub) e troca de câmera**; download de GLB e FBX; subir local com um comando.
+## Português
 
-> Este comparativo passou por **contraprova adversarial** (documento
-> `.cluster/video2mixamo/subagent_02.md`), que corrigiu uma premissa comum:
-> o `gr.Model3D` do Gradio **reproduz** a animação do GLB em autoplay (viewer Babylon,
-> `animationAutoPlay=true` desde o PR #10993). O que ele **não** oferece é API de controle
-> (play/pause/timeline/scrub) a partir do Python. A decisão abaixo foi reescrita com essa correção.
+Este documento também está disponível em português: [UI_FRAMEWORK_COMPARISON.pt-BR.md](UI_FRAMEWORK_COMPARISON.pt-BR.md).
 
-## Matriz por requisito
+Criteria derived from the product requirements: a backend dropdown fed by the plugin registry;
+video upload; persistent job status panel; **3D preview with play/pause, timeline (scrub) and
+camera switching**; GLB and FBX download; local startup with a single command.
 
-| Requisito | Gradio | Streamlit | **FastAPI + SPA (escolhido)** |
+> This comparison went through an **adversarial counter-check** (document
+> `.cluster/video2mixamo/subagent_02.md`), which corrected a common premise:
+> Gradio's `gr.Model3D` **does play** the GLB animation on autoplay (Babylon viewer,
+> `animationAutoPlay=true` since PR #10993). What it does **not** offer is a control API
+> (play/pause/timeline/scrub) from Python. The decision below was rewritten with that correction.
+
+## Matrix by requirement
+
+| Requirement | Gradio | Streamlit | **FastAPI + SPA (chosen)** |
 |---|---|---|---|
-| **Preview 3D + play/pause + timeline + câmera** | **quase** — órbita e autoplay da animação GLB funcionam; play/pause/timeline exigem JS injetado (`js=`) ou componente custom | **quebra** — todo viewer 3D vive em **iframe isolado**; controles do app não o comandam; exigiria componente React (≈ escrever a SPA) | **nativo** — three.js `AnimationMixer` + timeline própria |
-| Dropdown dinâmico por registro de plugins | atende (`Dropdown.choices` como output) | atende (`selectbox.options`) | atende (`GET /api/backends`) |
-| Jobs longos + progresso + cancelamento | fila, `gr.Progress` e `cancels=` nativos; **persistência entre sessões é DIY** (guia oficial manda trazer APScheduler); bugs recentes de cancelamento (#13323/#13895) | executor próprio + `st.fragment(run_every=)` para polling (suportado); cancelamento cooperativo; bug aberto de estado em auto-rerun (#14064) | **mesmo trabalho** (`JobStore` + worker), sem lutar contra o modelo de execução do framework |
-| Download de 2 formatos por job | atende (`DownloadButton`) | atende (`st.download_button`) | atende (`FileResponse`) |
-| Adapters extensíveis | atende | atende (cuidado com registro em import-time + reruns) | atende (sem lifecycle alheio) |
-| Subir com 1 comando | ótimo | ótimo | ótimo (`python run.py`) |
-| Peso / licença | pesado · Apache-2.0 | pesado · Apache-2.0 | **leve · MIT** |
+| **3D preview + play/pause + timeline + camera** | **almost** — orbit and GLB animation autoplay work; play/pause/timeline need injected JS (`js=`) or a custom component | **breaks** — every 3D viewer lives in an **isolated iframe**; the app's controls cannot command it; it would need a React component (≈ writing the SPA) | **native** — three.js `AnimationMixer` + our own timeline |
+| Dynamic dropdown from the plugin registry | works (`Dropdown.choices` as output) | works (`selectbox.options`) | works (`GET /api/backends`) |
+| Long jobs + progress + cancellation | queue, `gr.Progress` and `cancels=` native; **persistence across sessions is DIY** (official guide tells you to bring APScheduler); recent cancellation bugs (#13323/#13895) | own executor + `st.fragment(run_every=)` for polling (supported); cooperative cancellation; open state bug on auto-rerun (#14064) | **same work** (`JobStore` + worker), without fighting the framework's execution model |
+| Two download formats per job | works (`DownloadButton`) | works (`st.download_button`) | works (`FileResponse`) |
+| Extensible adapters | works | works (mind import-time registration + reruns) | works (no foreign lifecycle) |
+| Single-command startup | great | great | great (`python run.py`) |
+| Weight / license | heavy · Apache-2.0 | heavy · Apache-2.0 | **light · MIT** |
 
-**Ponto que a contraprova reforça:** nenhum dos três entrega *job system persistente multi-sessão*
-pronto. Em qualquer base, o `JobStore` + worker com cancelamento cooperativo é módulo próprio — como
-de fato foi implementado (`core/jobs.py`, `core/pipeline.py`).
+**Point the counter-check reinforces:** none of the three ships a *multi-session persistent job
+system* out of the box. On any base, the `JobStore` + worker with cooperative cancellation is its own
+module — as it in fact was implemented (`core/jobs.py`, `core/pipeline.py`).
 
-## Decisão: FastAPI + SPA própria (three.js)
+## Decision: FastAPI + own SPA (three.js)
 
-**Justificativa correta** (reescrita após a contraprova): não é "Streamlit/Gradio não fazem jobs ou
-downloads" — fazem, e bem. O fator decisivo é que o **requisito central do produto** (timeline +
-play/pause + troca de câmera sobre animação GLB, controlados pelo app) **empurra ambos os frameworks
-para componentes custom / JS injetado**. Ou seja: o custo do frontend customizado é pago de qualquer
-jeito — e o caminho direto evita ainda (i) a ponte por iframe do Streamlit e (ii) o acoplamento ao
-ciclo de releases do viewer Babylon do Gradio (a regressão #10983/#10993 é evidência de que esse
-acoplamento quebra na prática).
+**Correct justification** (rewritten after the counter-check): it is not "Streamlit/Gradio cannot do
+jobs or downloads" — they do, and well. The deciding factor is that the **product's central
+requirement** (timeline + play/pause + camera switching over a GLB animation, controlled by the app)
+**pushes both frameworks into custom components / injected JS**. That is: the cost of a customized
+frontend is paid either way — and the direct path also avoids (i) Streamlit's iframe bridge and
+(ii) the coupling to Gradio's Babylon viewer release cycle (regression #10983/#10993 is evidence
+that this coupling breaks in practice).
 
-**Fallback explícito e condicional:** se o preview for rebaixado para "orbitar o GLB com autoplay"
-(sem timeline nem controles próprios), a hipótese cai em favor do **Gradio montado sobre FastAPI**
-(`gr.mount_gradio_app`) — que entrega os requisitos restantes (b)–(e) com bem menos código e mantém
-FastAPI por baixo. O Gradio **não abandona** FastAPI: é FastAPI.
+**Explicit, conditional fallback:** if the preview is downgraded to "orbit the GLB with autoplay"
+(no timeline and no controls of our own), the hypothesis falls in favor of **Gradio mounted on
+FastAPI** (`gr.mount_gradio_app`) — which delivers requirements (b)–(e) with far less code and keeps
+FastAPI underneath. Gradio **does not abandon** FastAPI: it is FastAPI.
 
-**Descartado: Streamlit** para este produto. O modelo de re-execução do script e o isolamento por
-iframe atacam exatamente o requisito central; para os demais requisitos ele é adequado, mas eles não
-são os diferenciadores.
+**Discarded: Streamlit** for this product. The script re-execution model and the iframe isolation
+attack exactly the central requirement; for the other requirements it is adequate, but they are not
+the differentiators.
 
-**Open WebUI** foi descartado na pesquisa inicial: é um produto chat-first para LLMs locais, sem
-viewer 3D nem pipeline de jobs, com licença que tem cláusula de branding.
+**Open WebUI** was discarded in the initial research: it is a chat-first product for local LLMs,
+with no 3D viewer and no job pipeline, under a license with a branding clause.
 
-## Consequência arquitetural
+## Architectural consequence
 
-Separar API (`server/app.py`) e SPA (`web/`) permite:
-- trocar a UI sem tocar no núcleo (a lógica de registry, adapters, fila e persistência é Python puro);
-- usar a API programaticamente (`curl`, scripts, CI);
-- manter o dropdown sincronizado com o registry por um único endpoint;
-- migrar para `mount_gradio_app` no futuro **sem reescrever o núcleo**, caso o escopo do preview mude.
+Separating API (`server/app.py`) and SPA (`web/`) allows:
+- swapping the UI without touching the core (the registry, adapters, queue and persistence logic is pure Python);
+- using the API programmatically (`curl`, scripts, CI);
+- keeping the dropdown in sync with the registry through a single endpoint;
+- migrating to `mount_gradio_app` in the future **without rewriting the core**, if the preview scope changes.
 
-## Lacuna declarada
+## Declared gap
 
-A contraprova baseou-se em documentação, issues e changelogs — **não** em um spike executando os
-três stacks com um GLB animado real da pipeline. A incerteza material restante é o comportamento do
-viewer Babylon do Gradio com GLBs retargetados. Se a decisão precisar ser reaberta, 1 dia de spike
-(GLB Mixamo no `gr.Model3D` v6.x vs. protótipo three.js mínimo) converte isso em dado.
+The counter-check relied on documentation, issues and changelogs — **not** on a spike running the
+three stacks with a real animated GLB from the pipeline. The remaining material uncertainty is the
+behavior of Gradio's Babylon viewer with retargeted GLBs. If the decision needs to be reopened,
+1 day of spike (a Mixamo GLB in `gr.Model3D` v6.x vs. a minimal three.js prototype) turns it into data.

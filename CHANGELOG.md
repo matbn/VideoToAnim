@@ -1,298 +1,217 @@
 # Changelog
 
-## [1.4.8] — Cabeça estável: orientação pelos olhos + profundidade sem singularidade
+## Português
 
-### Corrigido (relatado: "a cabeça do esqueleto se move mesmo com a cabeça parada no vídeo")
+Este documento também está disponível em português: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md).
 
-* **Profundidade do nariz**: o `solve("neck")` usava distância rígida com o termo
-  `sqrt(L²−d²)`; quando a distância 2D ombro→nariz caía abaixo de 0,28 m, o nariz
-  "mergulhava" até ~0,19 m em UM frame — a cabeça ganhava yaw/pitch de ~30° sozinha.
-  Agora o nariz fica no plano do tórax (z do centro dos ombros).
-* **Orientação da cabeça pela linha dos olhos**: o vetor `nariz − ombros` mede posição,
-  não orientação — com o corpo se deslocando no quadro ele gira (medido: 40° de roll no
-  vídeo A com a cabeça parada; 28,9° no B). A direção da cabeça agora vem da **linha dos
-  olhos**, com suavização adaptativa (EMA com peso reduzido quando os olhos ficam curtos)
-  e guardas para frames degenerados (oclusão/perfil).
-* **Neutralização no MUNDO pelo frame 0**: a calibração anterior zerava só as rotações
-  locais; a contribuição da coluna sobrevivia como viés constante (24° de lado, medido).
-  Agora `calibrate_head` neutraliza Neck/Head também no mundo no frame de referência.
+## [1.4.10] — Hand tracking actually animates + hands in the 2D debug overlay
 
-### Medido (A/B, 60 frames)
+### Fixed (reported: "the hand detector doesn't seem to be doing anything, and it doesn't show in the debug either")
 
-* A: tilt visível **40° → 0,71°** de amplitude (a linha dos olhos do vídeo mede 0,88°).
-* B: **40° → 10,4°** (concentrados no giro rápido; média 1,5°, std 2,2°); início em 0,00°.
+* **Finger rotations were never applied (bone index bug)**: the landmark->bone mapping built the bone name with a hardcoded index `0` (`LeftHandIndex0` — a bone that does not exist), so every rotation was silently skipped: **0 finger rotations on every job** since the feature was added (the log reported it honestly). The index (1 = MCP->PIP, 2 = PIP->DIP, 3 = DIP->TIP) is now correct.
+* **Hand pose mapping rewritten (skeleton math)**: the old code expressed the observed phalanges in a "hand frame" built from the hand's own landmarks — a basis unrelated to the rig — and ignored the body retarget's hand rotation; even with the index fixed the fingers came out scrambled. The new mapping resolves each joint inside the rig chain: `q1 = from_to(o2, rh^-1 . t1)`, `q2 = from_to(o3, (rh . q1)^-1 . t2)`, `q3 = from_to(o4, (rh . q1 . q2)^-1 . t3)`, where `oI` are the child bone rest offsets and `rh` is the hand's world rotation from the body retarget in that frame. A unit test reconstructs the observed phalanx directions from the output quaternions (agreement > 0.9999).
+* **Hands now visible in the 2D debug overlay**: hand landmarks are persisted per job (`hands.json`, 21 points per hand in video pixels) and both debug overlays (main viewer and refine editor) draw them over the video — left hand blue, right hand terracotta — alongside the body keypoints.
 
-### Técnico
+### Verified
 
-* O teste de skinning do usuário passava **por causa do bug** (a cabeça balançava e o
-  cabelo é ~metade dos vértices); agora mede a fração de vértices de **membros** que se
-  movem — nova métrica `moved_fraction_limbs` no `tools/verify_glb_skinning.py`.
-* 107 testes passando.
+* Repro with the real clip: before = 0 rotations applied; after = **2670 rotations**, hands detected in **151/167 frames** (job `c13a77f7b4df`).
+* Close-up render of the mesh: fingers curl in a natural C-shaped grip around the sword hilt, thumb on the correct side, not inside-out; a rest-pose control at the same camera shows the remaining blockiness is the source mesh (low-poly), not the animation.
+* pytest: **131/131**.
 
+## [1.4.9] — Stable rig: forearm twist eliminated + real-time refine editor
 
-## [1.4.7] — Calibração da cabeça pelo primeiro frame
+### Fixed (reported: "LeftForeArm rotates ~180° between frames 37-43 even though the LeftArm does not rotate"; "refine edit sliders stopped working in real time")
 
-### Corrigido
+* **Parasitic forearm twist (retarget)**: bone orientations were rebuilt every frame as the minimal rotation from the rest direction (`quat_from_to(d0, d)`); when a limb swept a large arc (forearm crossing the chest), the reconstruction accumulated up to ~180° of twist about the bone's own axis while the arm stood still. Orientations now use **parallel transport** (rotate the previous frame's orientation by the minimal rotation between consecutive directions). Twisting rate on the reported clip: **−20…−50 °/frame → 0.0 °/frame** in the base; final clip through constraints→collision→filters: **+156° → +3.5°** accumulated (max 9°/frame in a single frame).
+* **Euler extraction was not the inverse of euler construction**: `quat_to_euler_xyz_deg` returned negated angles (a +60° rotation read as −60°) and the round-trip missed by up to ~175°. The constraints clamp used both functions back-to-back, so near gimbal a 1.2° z-limit produced a **104°** rotation jump — the visible "impossible spin". The extraction is now the exact inverse (round-trip error 0.00°) and clamps act smoothly.
+* **Refine editor: stale sliders (request races)**: every scrub fired `/frame/{t}`; late replies from older frames overwrote the euler panel (reproduced: bone+frame change showed frame-0 values at frame 42). A sequence guard now drops out-of-order responses — the last scrub wins.
+* **Refine editor: live preview**: dragging rx/ry/rz rotates the selected bone immediately in the 3D views (same euler order as the server); "Apply" persists as before.
+* **Bone labels**: the `mixamorig` prefix is stripped as it appears at runtime (`mixamorigHips` — three.js removes the colon from node names).
+* **Body leaning sideways (lifted backends)**: the spine solve in the analytic lifter targeted the **left shoulder** as the direction reference for the chest center — biasing the chest ~0.18-0.21 m to the left and tilting the whole torso **~24°** in every frame on 2D-only backends (vitpose/rtmpose; mediapipe was unaffected since its 3D comes from the backend itself). The solve now targets the **mid-point of the shoulders** (as the code comment always intended); measured lean: **+24.3° → 0.0°** (vitpose), **+22.3° → +0.8°** (rtmpose). Long-standing bug: every previously processed job with lifting carries the lean and should be re-processed.
 
-* **Cabeça "olhando para baixo/para o lado" em todos os backends default**: o solver
-  orienta a cadeia pescoço/cabeça por um único vetor estimado (`nose - chest`), cuja
-  profundidade vem do lifter monocular e carregava um **viés sistemático** — medido entre
-  **55° e 75°** de rotação no `Neck` no frame 0 em jobs reais (o `Head` local é sempre
-  identidade; todo o erro mora no pescoço).
-* **Novo: calibração pelo frame de referência** (`core/retarget.py: calibrate_head`):
-  a rotação local de `Neck`/`Head` no frame 0 vira a identidade — a cabeça começa na
-  orientação de repouso (frente do corpo) e **todo o movimento relativo é preservado**
-  (teste: q'(t1)⁻¹q'(t2) == q(t1)⁻¹q(t2)). Controlável por `params.head_calibration`
-  (default `true`) e `params.head_calibration_frame` (default `0`); o resultado vai para o
-  log do job e para o `meta` do `anim.json`.
+### Verified
 
-### Verificado
+* pytest **125/125**; FK validation unchanged (12.63 cm / 0.01°).
+* Editor reproduced in a real headless Chromium: correct slider sync under rapid scrubbing, live preview updates both viewports, zero console errors.
 
-* E2E A/B no mesmo clipe: `Neck |q0|` **75,46° → 0,00°** com a calibração ligada;
-  GLB/FBX exportados normalmente; **107 testes** (4 novos de regressão).
+## [1.4.8] — Stable head: eye-line orientation + singularity-free depth
 
+### Fixed (reported: "the skeleton's head moves even though the head is still in the video")
 
-## [1.4.6] — RTMPose: NameError `_onnx_cuda_ok` corrigido + fallback de GPU
+* **Nose depth**: the `solve("neck")` used a rigid distance with the `sqrt(L²−d²)` term; when the 2D shoulder→nose distance dropped below 0.28 m, the nose "dived" up to ~0.19 m in ONE frame — the head picked up ~30° of yaw/pitch on its own. Now the nose stays on the chest plane (z of the shoulder center).
+* **Head orientation from the eye line**: the `nose − shoulders` vector measures position, not orientation — as the body shifts across the frame it rotates (measured: 40° of roll in video A with the head still; 28.9° in B). The head direction now comes from the **eye line**, with adaptive smoothing (EMA with reduced weight when the eyes get short) and guards for degenerate frames (occlusion/profile).
+* **World neutralization on frame 0**: the previous calibration only zeroed local rotations; the spine's contribution survived as a constant bias (24° sideways, measured). `calibrate_head` now also neutralizes Neck/Head in world space on the reference frame.
 
-### Corrigido
+### Measured (A/B, 60 frames)
 
-* **`ERRO: name '_onnx_cuda_ok' is not defined` no rtmpose**: o helper era chamado no
-  `load()` mas nunca tinha sido definido no módulo (pendência da rodada de GPU). Agora ele
-  existe, registra as DLLs do cuDNN antes de checar o provider, e o backend usa CUDA de
-  verdade — medido: **40 ms/frame na GPU** (steady state, 18 frames) contra ~200 ms na CPU.
-* O `load()` do rtmpose ganhou o mesmo cuidado do vitpose: se a sessão CUDA falhar na
-  criação, cai para CPU com motivo; e se a GPU falhar **na inferência** (ex.: cuDNN), cai
-  para CPU uma única vez e segue — sem poses vazias silenciosas.
-* O motivo do fallback (`_fallback_reason`) agora aparece no **log do job** ("Aviso: ...")
-  — antes era registrado no objeto e nunca mostrado.
+* A: visible tilt **40° → 0.71°** of amplitude (the video's own eye line measures 0.88°).
+* B: **40° → 10.4°** (concentrated in the fast turn; mean 1.5°, std 2.2°); starts at 0.00°.
 
-### Técnico
+### Technical
 
-* `core/gpu.py` ganhou `ensure_cuda_dlls()` (helper compartilhado de DLLs CUDA/cuDNN);
-  o vitpose passou a delegar para ele (uma única fonte de verdade).
-* Varredura estática (pyflakes) no projeto inteiro para garantir que não há outros nomes
-  indefinidos; novo teste de regressão `tests/test_backend_rtmpose.py`; **103 testes**.
+* The user's skinning test was passing **because of the bug** (the head wobbled and the hair is ~half the vertices); it now measures the fraction of **limb** vertices that move — new `moved_fraction_limbs` metric in `tools/verify_glb_skinning.py`.
+* 107 tests passing.
 
 
-## [1.4.5] — Vídeo de referência no editor de refino
+## [1.4.7] — Head calibration on the first frame
 
-### Adicionado
+### Fixed
 
-* O editor de refino ganhou o painel de **vídeo de referência** (mesmo artefato do job;
-  três painéis: vídeo · esqueleto · malha, como no pipeline). O vídeo **acompanha o scrub e o
-  playback**: cada frame da timeline posiciona o vídeo no instante correspondente (t / fps),
-  com guarda para não re-buscar o mesmo instante a cada passo.
-* Ao abrir um job sem `anim.json` (ou em falha de carregamento), o vídeo é descarregado junto
-  com a cena, em vez de ficar o clipe anterior na tela.
+* **Head "looking down/sideways" on all default backends**: the solver orients the neck/head chain from a single estimated vector (`nose - chest`), whose depth comes from the monocular lifter and carried a **systematic bias** — measured between **55° and 75°** of rotation on `Neck` at frame 0 in real jobs (the local `Head` is always identity; all of the error lives in the neck).
+* **New: calibration by the reference frame** (`core/retarget.py: calibrate_head`): the local rotation of `Neck`/`Head` at frame 0 becomes identity — the head starts at the rest orientation (facing the body's front) and **all relative motion is preserved** (test: q'(t1)⁻¹q'(t2) == q(t1)⁻¹q(t2)). Controllable via `params.head_calibration` (default `true`) and `params.head_calibration_frame` (default `0`); the result goes to the job log and to the `anim.json` `meta`.
 
-### Validado
+### Verified
 
-* `/refine` serve o painel (`id="refvideo"`); o artefato de vídeo responde 200
-  (`video/mp4`, 5,4 MB no job de teste); 101 testes passando; `node --check` limpo.
+* E2E A/B on the same clip: `Neck |q0|` **75.46° → 0.00°** with calibration on; GLB/FBX exported normally; **107 tests** (4 new regression tests).
 
 
-## [1.4.4] — Sync rotation, malha na prévia do refino e i18n (PT/EN)
+## [1.4.6] — RTMPose: `_onnx_cuda_ok` NameError fixed + GPU fallback
 
-### Adicionado
-
-* **sync rotation** no pipeline e no editor de refino: checkbox que sincroniza a câmera
-  entre os painéis de esqueleto e malha (ao vivo, nos dois sentidos; a preferência é
-  lembrada entre sessões).
-* **Internacionalização PT/EN de toda a interface** (pipeline + editor): seletor `PT | EN`
-  no topo, idioma inicial por `?lang=` / localStorage / navegador, e todos os textos
-  gerados por JS traduzidos (hints, tabelas, avisos, editor de constraints, log do editor).
-  Conteúdos também localizados: descrições dos filtros (`description_en`) e notas das 32
-  juntas (`note_en`). Logs de execução e erros da API seguem em PT (limite conhecido).
-
-### Corrigido
-
-* **A prévia do editor de refino agora carrega a MALHA processada do job** (não os
-  "capsule sticks"): o GLB de `/api/refine/animation/{id}/glb` e o export refinado embutem
-  a malha do usuário (carregada do `mesh.*` do job, cacheada por processo). Verificado:
-  GLB do refino byte-idêntico ao do pipeline (9.285 vértices / 17.916 triângulos, com skin).
-
-### Técnico
-
-* `core/gpu.py` e `core/provision.py` passaram a expor **códigos de motivo**
-  (`reason_code`/`reason_vars`, `manual_code`) para o front localizar sem duplicar regra —
-  a UI resolve PT/EN pelo código, com fallback para o texto.
-* Testes: 101 passando; `node --check` nos 3 módulos JS; consistência de ids JS×HTML e
-  paridade repo/staging verificadas.
-
-
-## [1.4.3] — Editor: abre o job em foco e constraints organizadas
-
-### Adicionado
-
-* **O editor de refino abre automaticamente o job que está aberto na aba principal**: a
-  página do pipeline passa a sincronizar o job em foco (inclusive o resultado de um novo
-  processamento) e o editor escolhe, em ordem: `?job=` da URL → job sincronizado → mais
-  recente. A seleção também fica na URL (`/refine?job=…`), então recarregar mantém o clipe.
-
-### Alterado
-
-* **Constraints reorganizadas** (`web/refine.js` + `web/style.css`): a lista plana de 32
-  linhas sem estilo deu lugar a **grupos por região do corpo** (tronco, cabeça/pescoço,
-  braços esquerdo/direito, pernas esquerda/direita, mãos), recolhíveis, com **legenda de
-  colunas** (junta · mín° · máx° · rigidez), **chip de tipo** com cor por eixo (cone/x/y/z),
-  **barra visual de faixa** (−180°..180°), **filtro de busca** por junta/tipo/nota,
-  **contagem por grupo** e **destaque de alterações pendentes** no botão Salvar (com aviso
-  visual de mín > máx).
-* Checklist de filtros ganhou estilo consistente com o resto da página.
-
-
-## [1.4.2] — Editor de refino: playback e troca de clipe
-
-### Corrigido
-
-* **A animação não tocava no editor**: a ação de animação era criada **pausada** e o scrub
-  usava `mixer.setTime()`; com a ação pausada o three.js usa `timeScale` efetivo 0 e o clipe
-  fica travado no instante 0. Comprovado com o **three.js 0.169** (a mesma versão da página)
-  num script isolado: `paused + setTime(1.5s)` deixa a propriedade em 0;
-  `action.time = 1.5 + mixer.update(0)` aplica o valor interpolado (15). O scrub agora usa
-  `action.time` + `update(0)` — o botão play avança os frames pelo mesmo caminho.
-* **O clipe antigo não "descarregava" ao trocar de job**: o `SkeletonHelper` ficava na cena
-  (o `clear()` do editor não o removia — a versão da página principal já removia) e acumulava
-  esqueletos. Agora `clear()` remove helper e modelo (com `dispose`), roda **antes** do
-  download do novo clipe, mostra "carregando…" e, em falha, o motivo no overlay.
-* Escolher um job sem `anim.json` (antigo) agora **limpa a cena** e mostra o motivo — antes o
-  clipe anterior ficava na tela como se nada tivesse acontecido.
-* Links "GLB/FBX refinado" agora são por job: não ficam pendurados ao trocar de clipe
-  (resetados; reativados apenas se o job tiver artefatos refinados).
-* A pose na cena é aplicada **antes** do fetch do frame (o playback não depende da rede) e
-  uma falha do painel de euler não interrompe mais a animação.
-* Troca rápida de clipe não deixa mais um carregamento antigo sobrescrever o novo
-  (token de carregamento).
-
-
-## [1.4.1] — Rotas de refino restauradas e dispositivo honesto na interface
-
-### Corrigido
-
-* **Dropdown de filtros vazio (regressão real)**: o include da API de refino tinha se
-  perdido do `server/app.py` — o servidor subia sem `/api/refine/*` (404 silencioso) e
-  sem a página `/refine`. Restaurado, com **teste de regressão de rotas**
-  (`tests/test_server_routes.py`) que trava o conjunto de rotas via OpenAPI.
-* **Import circular latente**: `install_api`/`refine_api` importavam estado do `app.py`
-  no topo; importar qualquer um dos módulos *antes* do app quebrava com
-  `ImportError: cannot import name 'router' from partially initialized module`.
-  Agora os módulos não dependem do app no boot (o `store` é resolvido tardiamente).
-* **"ViTPose (ONNX, CPU)" fixo no dropdown**: o nome dizia CPU mesmo rodando em GPU.
-  O rótulo agora é neutro e a interface mostra o **dispositivo real** de cada backend
-  (GPU CUDA / GPU DirectML / GPU MPS / CPU), com o motivo quando fica em CPU.
-* Rótulo de GPU duplicava o vendor ("NVIDIA NVIDIA GeForce...") e o motivo do
-  MediaPipe citava uma razão vaga — ambos corrigidos.
-* Mojibake (`â€”`) em logs/docstrings/changelog.
-
-### Documentado
-
-* **Por que o MediaPipe roda em CPU**: o wheel de desktop do pip é compilado sem
-  suporte a GPU — `GPU processing is disabled in build flags` (verificado nesta
-  máquina, mediapipe 1.0.1). O delegate de GPU só existe nas builds móveis
-  (Android/iOS). Em CPU a inferência é rápida (~13 ms/frame para mãos).
-* **Hand tracking e o modelo**: usa o HandLandmarker do MediaPipe
-  (`hand_landmarker.task`), isolado em `core/hands.py`; o caminho do modelo pode ser
-  trocado via `V2M_HAND_MODEL` ou `params.hands.model_path`, e `min_conf`/`upscale`
-  agora vêm do job (`params.hands`).
-
-
-## [1.4.0] — GPU automática e hand tracking
-
-### Adicionado
-
-* **Detecção de GPU** (`core/gpu.py`): NVIDIA (nvidia-smi), AMD/Intel (WMI), Apple Silicon, ROCm —
-  com **matriz de compatibilidade por backend** e explicação quando a GPU não serve
-  (ex.: AMD no Windows com PyTorch oficial, que não publica ROCm).
-* **Provisionamento ciente de GPU**: instala `onnxruntime-gpu` (+ `nvidia-cudnn-cu12` e
-  `nvidia-cublas-cu12`), `onnxruntime-directml` ou `onnxruntime` conforme o hardware; para
-  PyTorch, usa o `--index-url` da build CUDA; e baixa a **variante certa do modelo**
-  (fp32 na GPU, int8 na CPU).
-* **Uso real da GPU no runtime**: `CUDAExecutionProvider`/`DmlExecutionProvider` nos backends ONNX,
-  com registro das DLLs do cuDNN no `PATH` do processo.
-* **Fallback de inferência**: se a GPU falhar em runtime, o backend volta para CPU e registra o
-  motivo — antes isso produzia poses vazias silenciosamente.
-* **Hand tracking** (`core/hands.py`): checkbox na interface; baixa o `hand_landmarker.task` (~8 MB),
-  detecta as mãos (21 pontos) e anima os **40 ossos de dedo**, que antes ficavam em identidade.
-  Parâmetros `min_conf` (default 0,3) e `upscale` para mãos pequenas no vídeo.
-
-### Medido
-
-* RTX 5060 Laptop: **8,0 ms/frame (GPU)** vs **77 ms/frame (CPU)** no ViTPose-ONNX — ~10×,
-  com score equivalente (0,80).
-* Hand tracking no vídeo de teste (sword swing): mãos detectadas em 10/40 frames com `min_conf=0,2`
-  (0/40 no limiar padrão de 0,5) — mãos pequenas exigem limiar mais baixo.
-## [1.3.0] — Aba de histórico de jobs
-
-### Adicionado
-
-* **Aba Histórico** na interface (ao lado de "Novo job"): lista os jobs guardados no SQLite
-  com id, data, vídeo, backend, status e frames; filtro por **status** e **backend**; e ações
-  por linha — **abrir** no visualizador (sem reprocessar), baixar **GLB/FBX** e ir para o
-  **editor de refino** daquele clipe.
-* `GET /api/jobs` agora aceita `?status=`, `?backend=` e `?limit=` (até 500).
-* O editor aceita `?job=<id>` para abrir já no clipe vindo do histórico.
-* Ao terminar um job novo, a lista do histórico é atualizada automaticamente.
-
-## [1.2.0] — Instalação automática dos backends
-
-### Adicionado
-
-* **Provisionamento por backend** (`core/provision.py`): planos declarativos com passos `pip`, `git`
-  e `download`, executados dentro do projeto (`models/`, `third_party/`), sem tocar no sistema.
-* **API**: `GET/POST /api/backends/{nome}/install` (status + log + relatório em background) e o campo
-  `install` em `GET /api/backends`.
-* **Interface**: o dropdown mostra "instalável" / "passo manual" em vez de "indisponível", com botão
-  **"Instalar automaticamente"** e log ao vivo; ao terminar, a disponibilidade é recarregada.
-* Backends clonados passam a ser detectados sozinhos (`third_party/...`), sem variável de ambiente.
-* Testes `tests/test_provision.py` garantindo que todo backend visível tem plano coerente e que os
-  "manuais" explicam o motivo e não tentam instalar.
-
-### Notas
-
-* Três backends continuam **manuais** por impossibilidade real: `openpose` (build C++),
-  `sam3dbody` (termos próprios da Meta) e `wham` (corpo SMPL com aceite de licença da Max Planck).
-* `yolopose` instala, mas o `ultralytics` arrasta o PyTorch (~2,5 GB) — a interface avisa antes.
-
-## [1.1.0] — Camada de refinamento de animações
-
-### Adicionado
-
-* **Filtros de estabilização** (`core/refine/filters.py`): seis métodos além do One-Euro —
-  `moving_average`, `savgol`, `kalman`, `butterworth`, `double_exponential` — todos em **numpy puro**
-  (sem scipy), configuráveis por osso, por eixo e por intervalo de frames.
-* **Plano de filtragem** (`core/refine/plan.py`) com arquivo YAML reaplicável
-  (`config/filters_default.yaml`).
-* **Constraints articulares** (`core/refine/constraints.py`) com **preset humanoide** completo
-  (32 limites) em arquivo editável `config/constraints_humanoid.yaml`; suporta limite por **cone**
-  (desvio total) e por **eixo** com min/max assimétricos (cotovelo/joelho sem hiperextensão), com
-  `stiffness` e correção suave por slerp.
-* **Editor de bone com rebake por keyframe** (`core/refine/boneedit.py`): escolhe osso, frame alvo e
-  intervalo afetado; interpola com ease-in-out entre o último frame não afetado, o frame editado e o
-  primeiro não afetado depois — **reescrevendo cada frame** (bake), sem curvas no arquivo final.
-* **Histórico persistido** (undo/redo) com autor, nota e timestamp; a sessão sobrevive a reinício.
-* **Relatório comparativo** (`core/refine/report.py`): suavidade (energia do jerk), atraso
-  (correlação cruzada) e desvio residual (RMSE + erro angular) por filtro, em Markdown e JSON.
+### Fixed
+
+* **`ERRO: name '_onnx_cuda_ok' is not defined` on rtmpose**: the helper was called in `load()` but had never been defined in the module (a leftover from the GPU round). It now exists, registers the cuDNN DLLs before checking the provider, and the backend really uses CUDA — measured: **40 ms/frame on GPU** (steady state, 18 frames) against ~200 ms on CPU.
+* The rtmpose `load()` gained the same care as vitpose: if the CUDA session fails to be created, it falls back to CPU with a reason; and if the GPU fails **during inference** (e.g., cuDNN), it falls back to CPU once and continues — no silent empty poses.
+* The fallback reason (`_fallback_reason`) now shows up in the **job log** ("Aviso: ...") — before it was recorded on the object and never shown.
+
+### Technical
+
+* `core/gpu.py` gained `ensure_cuda_dlls()` (shared CUDA/cuDNN DLL helper); vitpose now delegates to it (a single source of truth).
+* Static scan (pyflakes) across the whole project to make sure there are no other undefined names; new regression test `tests/test_backend_rtmpose.py`; **103 tests**.
+
+
+## [1.4.5] — Reference video in the refine editor
+
+### Added
+
+* The refine editor gained the **reference video** panel (same artifact as the job; three panels: video · skeleton · mesh, as in the pipeline). The video **follows the scrub and playback**: each timeline frame positions the video at the corresponding instant (t / fps), with a guard against re-seeking the same instant on every step.
+* When opening a job without `anim.json` (or on load failure), the video is unloaded together with the scene, instead of leaving the previous clip on screen.
+
+### Validated
+
+* `/refine` serves the panel (`id="refvideo"`); the video artifact responds 200 (`video/mp4`, 5.4 MB in the test job); 101 tests passing; `node --check` clean.
+
+
+## [1.4.4] — Sync rotation, mesh in the refine preview and i18n (PT/EN)
+
+### Added
+
+* **sync rotation** in the pipeline and in the refine editor: a checkbox that keeps the camera in sync between the skeleton and mesh panels (live, both ways; the preference is remembered across sessions).
+* **PT/EN internationalization of the whole interface** (pipeline + editor): `PT | EN` switcher at the top, initial language from `?lang=` / localStorage / browser, and every JS-generated string translated (hints, tables, warnings, constraints editor, editor log). Also localized: filter descriptions (`description_en`) and the notes of the 32 joints (`note_en`). Runtime logs and API errors remain in PT (known limit).
+
+### Fixed
+
+* **The refine editor preview now loads the job's processed MESH** (not the "capsule sticks"): the GLB from `/api/refine/animation/{id}/glb` and the refined export embed the user mesh (loaded from the job's `mesh.*`, cached per process). Verified: refine GLB byte-identical to the pipeline's (9,285 vertices / 17,916 triangles, with skin).
+
+### Technical
+
+* `core/gpu.py` and `core/provision.py` now expose **reason codes** (`reason_code`/`reason_vars`, `manual_code`) so the front end can localize without duplicating rules — the UI resolves PT/EN from the code, with a fallback to the text.
+* Tests: 101 passing; `node --check` on the 3 JS modules; JS×HTML id consistency and repo/staging parity verified.
+
+
+## [1.4.3] — Editor: opens the focused job and organized constraints
+
+### Added
+
+* **The refine editor automatically opens the job that is open in the main tab**: the pipeline page now syncs the focused job (including the result of a new processing run) and the editor picks, in order: `?job=` from the URL → synced job → most recent. The selection also goes into the URL (`/refine?job=…`), so reloading keeps the clip.
+
+### Changed
+
+* **Constraints reorganized** (`web/refine.js` + `web/style.css`): the flat list of 32 unstyled rows gave way to **groups by body region** (torso, head/neck, left/right arms, left/right legs, hands), collapsible, with **column legend** (joint · min° · max° · stiffness), **type chip** colored by axis (cone/x/y/z), **visual range bar** (−180°..180°), **search filter** by joint/type/note, **per-group count** and a **pending-changes highlight** on the Save button (with a visual warning for min > max).
+* The filters checklist gained a style consistent with the rest of the page.
+
+
+## [1.4.2] — Refine editor: playback and clip switching
+
+### Fixed
+
+* **The animation would not play in the editor**: the action was created **paused** and the scrub used `mixer.setTime()`; with the action paused, three.js uses an effective `timeScale` of 0 and the clip stays stuck at instant 0. Proven with **three.js 0.169** (the same version as the page) in an isolated script: `paused + setTime(1.5s)` leaves the property at 0; `action.time = 1.5 + mixer.update(0)` applies the interpolated value (15). The scrub now uses `action.time` + `update(0)` — the play button advances frames through the same path.
+* **The old clip did not "unload" when switching jobs**: the `SkeletonHelper` stayed in the scene (the editor's `clear()` did not remove it — the main page's version did) and skeletons piled up. Now `clear()` removes helper and model (with `dispose`), runs **before** downloading the new clip, shows "carregando…" and, on failure, the reason in the overlay.
+* Selecting a job without `anim.json` (an old one) now **clears the scene** and shows the reason — before, the previous clip stayed on screen as if nothing had happened.
+* "Refined GLB/FBX" links are now per job: they no longer hang around when switching clips (reset; re-enabled only if the job has refined artifacts).
+* The pose in the scene is applied **before** fetching the frame (playback does not depend on the network) and a failure of the euler panel no longer interrupts the animation.
+* Rapid clip switching no longer lets an old load overwrite the new one (loading token).
+
+
+## [1.4.1] — Refine routes restored and honest device in the interface
+
+### Fixed
+
+* **Empty filters dropdown (a real regression)**: the refine API include had been lost from `server/app.py` — the server started without `/api/refine/*` (silent 404) and without the `/refine` page. Restored, with a **route regression test** (`tests/test_server_routes.py`) that locks the route set via OpenAPI.
+* **Latent circular import**: `install_api`/`refine_api` imported state from `app.py` at the top; importing either module *before* the app broke with `ImportError: cannot import name 'router' from partially initialized module`. The modules no longer depend on the app at boot (`store` is resolved lazily).
+* **"ViTPose (ONNX, CPU)" hardcoded in the dropdown**: the name said CPU even when running on GPU. The label is now neutral and the interface shows the **real device** of each backend (GPU CUDA / GPU DirectML / GPU MPS / CPU), with the reason when it stays on CPU.
+* The GPU label duplicated the vendor ("NVIDIA NVIDIA GeForce...") and MediaPipe's reason cited a vague cause — both fixed.
+* Mojibake (`â€”`) in logs/docstrings/changelog.
+
+### Documented
+
+* **Why MediaPipe runs on CPU**: the pip desktop wheel is built without GPU support — `GPU processing is disabled in build flags` (verified on this machine, mediapipe 1.0.1). The GPU delegate only exists in the mobile builds (Android/iOS). On CPU the inference is fast (~13 ms/frame for hands).
+* **Hand tracking and the model**: uses MediaPipe's HandLandmarker (`hand_landmarker.task`), isolated in `core/hands.py`; the model path can be overridden via `V2M_HAND_MODEL` or `params.hands.model_path`, and `min_conf`/`upscale` now come from the job (`params.hands`).
+
+
+## [1.4.0] — Automatic GPU and hand tracking
+
+### Added
+
+* **GPU detection** (`core/gpu.py`): NVIDIA (nvidia-smi), AMD/Intel (WMI), Apple Silicon, ROCm — with a **per-backend compatibility matrix** and an explanation when the GPU is not usable (e.g., AMD on Windows with official PyTorch, which does not publish ROCm).
+* **GPU-aware provisioning**: installs `onnxruntime-gpu` (+ `nvidia-cudnn-cu12` and `nvidia-cublas-cu12`), `onnxruntime-directml` or `onnxruntime` according to the hardware; for PyTorch, uses the CUDA build's `--index-url`; and downloads the **right model variant** (fp32 on GPU, int8 on CPU).
+* **Real GPU use at runtime**: `CUDAExecutionProvider`/`DmlExecutionProvider` in the ONNX backends, with the cuDNN DLLs registered on the process `PATH`.
+* **Inference fallback**: if the GPU fails at runtime, the backend falls back to CPU and records the reason — before, this silently produced empty poses.
+* **Hand tracking** (`core/hands.py`): checkbox in the interface; downloads `hand_landmarker.task` (~8 MB), detects the hands (21 points) and animates the **40 finger bones**, which used to stay at identity. Parameters `min_conf` (default 0.3) and `upscale` for small hands in the video.
+
+### Measured
+
+* RTX 5060 Laptop: **8.0 ms/frame (GPU)** vs **77 ms/frame (CPU)** on ViTPose-ONNX — ~10×, with an equivalent score (0.80).
+* Hand tracking on the test video (sword swing): hands detected in 10/40 frames with `min_conf=0.2` (0/40 at the default 0.5 threshold) — small hands require a lower threshold.
+
+## [1.3.0] — Job history tab
+
+### Added
+
+* **History tab** in the interface (next to "New job"): lists the jobs stored in SQLite with id, date, video, backend, status and frames; filter by **status** and **backend**; and per-row actions — **open** in the viewer (without reprocessing), download **GLB/FBX** and go to that clip's **refine editor**.
+* `GET /api/jobs` now accepts `?status=`, `?backend=` and `?limit=` (up to 500).
+* The editor accepts `?job=<id>` to open directly on the clip coming from the history.
+* When a new job finishes, the history list is refreshed automatically.
+
+## [1.2.0] — Automatic backend installation
+
+### Added
+
+* **Per-backend provisioning** (`core/provision.py`): declarative plans with `pip`, `git` and `download` steps, executed inside the project (`models/`, `third_party/`), without touching the system.
+* **API**: `GET/POST /api/backends/{name}/install` (status + log + report in the background) and the `install` field in `GET /api/backends`.
+* **Interface**: the dropdown shows "installable" / "manual step" instead of "unavailable", with an **"Install automatically"** button and a live log; when done, availability is reloaded.
+* Cloned backends are now detected automatically (`third_party/...`), with no environment variable.
+* `tests/test_provision.py` tests ensuring every visible backend has a coherent plan and that the "manual" ones explain the reason and do not attempt to install.
+
+### Notes
+
+* Three backends remain **manual** for real impossibility: `openpose` (C++ build), `sam3dbody` (Meta's own terms) and `wham` (SMPL body under Max Planck's license acceptance).
+* `yolopose` installs, but `ultralytics` drags in PyTorch (~2.5 GB) — the interface warns beforehand.
+
+## [1.1.0] — Animation refinement layer
+
+### Added
+
+* **Stabilization filters** (`core/refine/filters.py`): six methods besides One-Euro — `moving_average`, `savgol`, `kalman`, `butterworth`, `double_exponential` — all in **pure numpy** (no scipy), configurable per bone, per axis and per frame range.
+* **Filtering plan** (`core/refine/plan.py`) with a reapplicable YAML file (`config/filters_default.yaml`).
+* **Joint constraints** (`core/refine/constraints.py`) with the full **humanoid preset** (32 limits) in an editable file `config/constraints_humanoid.yaml`; supports **cone** limits (total deviation) and per-**axis** limits with asymmetric min/max (elbow/knee without hyperextension), with `stiffness` and smooth correction via slerp.
+* **Bone editor with per-keyframe rebake** (`core/refine/boneedit.py`): pick the bone, target frame and affected range; interpolates with ease-in-out between the last unaffected frame, the edited frame and the first unaffected one after it — **rewriting every frame** (bake), no curves in the final file.
+* **Persisted history** (undo/redo) with author, note and timestamp; the session survives a restart.
+* **Comparison report** (`core/refine/report.py`): smoothness (jerk energy), lag (cross-correlation) and residual deviation (RMSE + angular error) per filter, in Markdown and JSON.
 * **CLI** `tools/refine.py` (`--make-samples`, `--compare`, `--inject-violation`, `--out`).
-* **API REST** `server/refine_api.py` e **editor web** em `/refine`.
-* **Testes** `tests/test_refine.py` (16 casos) cobrindo os critérios de aceite.
+* **REST API** `server/refine_api.py` and **web editor** at `/refine`.
+* **Tests** `tests/test_refine.py` (16 cases) covering the acceptance criteria.
 
-### Corrigido
+### Fixed
 
-* `mixamo.quat_normalize` usava `np.linalg.norm(q)` sem eixo: numa série `(T,4)` isso calculava a
-  norma de **Frobenius** e dividia a série inteira por ela, deixando cada quaternion com norma errada
-  (bug silencioso, exposto ao filtrar séries). Agora normaliza no último eixo e aceita 1 ou N
-  quaternions.
-* `constraints.apply_constraints` reescrevia todos os frames do osso mesmo sem violação; agora só
-  escreve quando há correção, preservando bit-exatamente o que não foi tocado.
+* `mixamo.quat_normalize` used `np.linalg.norm(q)` without an axis: on a `(T,4)` series this computed the **Frobenius** norm and divided the whole series by it, leaving every quaternion with the wrong norm (a silent bug, exposed when filtering series). It now normalizes on the last axis and accepts 1 or N quaternions.
+* `constraints.apply_constraints` rewrote every frame of the bone even without a violation; it now writes only when there is a correction, preserving bit-exactly what was not touched.
 
-### Requisitos de ambiente
+### Environment requirements
 
-* Python 3.11+ (testado em 3.13) · numpy ≥ 1.26 · PyYAML ≥ 6.0
-* Sem dependências novas: a camada usa apenas numpy/pyyaml (já presentes) — **scipy não é
-  necessário** (savgol e butterworth implementados à mão).
-* CLI: `python tools/refine.py --make-samples` funciona com o venv do projeto.
+* Python 3.11+ (tested on 3.13) · numpy ≥ 1.26 · PyYAML ≥ 6.0
+* No new dependencies: the layer uses only numpy/pyyaml (already present) — **scipy is not needed** (savgol and butterworth implemented by hand).
+* CLI: `python tools/refine.py --make-samples` works with the project venv.
 
-## [1.0.0] — Pipeline vídeo → animação Mixamo
+## [1.0.0] — Video → Mixamo animation pipeline
 
-* Backends de pose com categoria de licença, retarget para o rig Mixamo de 65 ossos, export GLB/FBX,
-  editor de malha (FBX/GLB) e preview 3D com vídeo de referência. Ver `README.md`.
+* Pose backends with a license category, retarget to the 65-bone Mixamo rig, GLB/FBX export, mesh editor (FBX/GLB) and 3D preview with a reference video. See `README.md`.

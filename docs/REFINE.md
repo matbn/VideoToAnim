@@ -1,134 +1,137 @@
-# Camada de refinamento de animações
+# Animation refinement layer
 
-A animação que sai do pipeline é **bakeada**: uma pose por frame, sem curvas. Esta camada refina esse
-clipe com três ferramentas, sem tocar no arquivo original:
+## Português
+
+Este documento também está disponível em português: [REFINE.pt-BR.md](REFINE.pt-BR.md).
+
+The animation coming out of the pipeline is **baked**: one pose per frame, no curves. This layer
+refines that clip with three tools, without touching the original file:
 
 ```
-animação bakeada ──► 1. constraints ──► 2. filtros ──► 3. edições de bone ──► animação refinada
-                       (limites)          (estabilização)   (keyframes rebakeados)
+baked animation ──► 1. constraints ──► 2. filters ──► 3. bone edits ──► refined animation
+                     (joint limits)     (stabilization)   (rebaked keyframes)
 ```
 
-A ordem importa: os limites são impostos **antes** de suavizar (senão o filtro pode empurrar de volta
-para fora do limite), e as edições manuais vêm **por último**, para a sua intenção vencer.
+The order matters: the limits are imposed **before** smoothing (otherwise the filter can push back
+outside the limit), and the manual edits come **last**, so your intention wins.
 
 ---
 
-## 1. Filtros de estabilização
+## 1. Stabilization filters
 
-Seis métodos, todos em numpy puro (sem scipy), selecionáveis por nome e configuráveis por **osso**,
-por **eixo** e por **intervalo de frames**:
+Six methods, all in pure numpy (no scipy), selectable by name and configurable per **bone**,
+per **axis** and per **frame range**:
 
-| filtro | parâmetros | quando usar |
+| filter | parameters | when to use |
 |---|---|---|
-| `one_euro` | `min_cutoff` (1.0), `beta` (0.02), `d_cutoff` (1.0) | padrão do projeto; corta mais onde o movimento é lento |
-| `moving_average` | `window` (5), `weight` (`linear`\|`uniform`) | simples e previsível; bom para tremores curtos |
-| `savgol` | `window` (11, ímpar), `order` (2) | suaviza **preservando picos** e acelerações |
-| `kalman` | `process_noise` (1e-3), `measurement_noise` (1e-2) | ruído gaussiano; modelo de velocidade constante |
-| `butterworth` | `cutoff_hz` (6.0), `order` (2), `zero_phase` (true) | corte de frequência; `zero_phase` **não introduz atraso** |
-| `double_exponential` | `alpha` (0.35), `beta` (0.1) | segue tendência com pouca memória (Holt) |
+| `one_euro` | `min_cutoff` (1.0), `beta` (0.02), `d_cutoff` (1.0) | project default; cuts more where the motion is slow |
+| `moving_average` | `window` (5), `weight` (`linear`\|`uniform`) | simple and predictable; good for short tremors |
+| `savgol` | `window` (11, odd), `order` (2) | smooths **preserving peaks** and accelerations |
+| `kalman` | `process_noise` (1e-3), `measurement_noise` (1e-2) | Gaussian noise; constant-velocity model |
+| `butterworth` | `cutoff_hz` (6.0), `order` (2), `zero_phase` (true) | frequency cut; `zero_phase` **introduces no lag** |
+| `double_exponential` | `alpha` (0.35), `beta` (0.1) | follows trend with little memory (Holt) |
 
-Quaternions são filtrados com **correção de continuidade de sinal** (`q` e `-q` são a mesma rotação;
-filtrar sem isso produz saltos de 2 em cada componente) e re-normalizados.
+Quaternions are filtered with **sign-continuity correction** (`q` and `-q` are the same rotation;
+filtering without that produces jumps of 2 in each component) and re-normalized.
 
-### Arquivo de configuração
+### Configuration file
 
 `config/filters_default.yaml`:
 
 ```yaml
-apply_to_translation: true      # filtra também a translação do root (Hips)
+apply_to_translation: true      # also filters the root (Hips) translation
 filters:
-  - name: one_euro              # mãos tremem mais: janela reativa
+  - name: one_euro              # hands tremble more: reactive window
     params: {min_cutoff: 1.2, beta: 0.03}
     bones: [LeftHand, RightHand, LeftForeArm, RightForeArm]
-  - name: butterworth           # tronco: suave e sem atraso de fase
+  - name: butterworth           # torso: smooth and with no phase lag
     params: {cutoff_hz: 6.0, zero_phase: true}
     bones: [Spine, Spine1, Spine2]
-    start: 0                    # intervalo opcional (inclusivo)
+    start: 0                    # optional range (inclusive)
     end: 120
-  - name: savgol                # padrão para todo o resto
+  - name: savgol                # default for everything else
     params: {window: 9, order: 2}
-  - name: kalman                # só o eixo Y da cabeça, num trecho
+  - name: kalman                # only the head's Y axis, in a stretch
     axis: y
     bones: [Head]
     start: 200
     end: 260
 ```
 
-Regras são avaliadas **em ordem**; a última que casar com o osso vence. Campos: `name`, `params`,
-`bones` (omitir = todos), `start`/`end` (intervalo inclusivo), `axis` (`x`/`y`/`z`/`w` = filtra só
-esse componente).
+Rules are evaluated **in order**; the last one matching the bone wins. Fields: `name`, `params`,
+`bones` (omit = all), `start`/`end` (inclusive range), `axis` (`x`/`y`/`z`/`w` = filters only that
+component).
 
-**Frames fora do intervalo ficam exatamente iguais** — o filtro é aplicado ao trecho, não ao clipe.
+**Frames outside the range stay exactly the same** — the filter is applied to the stretch, not the clip.
 
 ---
 
-## 2. Constraints articulares
+## 2. Joint constraints
 
-Preset humanoide completo em `config/constraints_humanoid.yaml` — **edite o arquivo**, nada de tocar
-em código.
+Full humanoid preset in `config/constraints_humanoid.yaml` — **edit the file**, no need to touch code.
 
 ```yaml
 name: humanoid
 limits:
   - {bone: Head, kind: cone, min_deg: -180, max_deg: 50, stiffness: 1.0}
   - {bone: Head, kind: y, min_deg: -70, max_deg: 70}
-  - {bone: LeftForeArm, kind: z, min_deg: -5, max_deg: 160}   # sem hiperextensão
+  - {bone: LeftForeArm, kind: z, min_deg: -5, max_deg: 160}   # no hyperextension
   - {bone: RightLeg, kind: z, min_deg: -155, max_deg: 5}
 ```
 
-* `kind: cone` — limita o **desvio total** da rotação local (em graus). É o que impede "cabeça
-  virando 180°" e dá o **cone de movimento** do ombro.
-* `kind: x | y | z` — limita **um eixo**, com `min_deg`/`max_deg` **assimétricos**: é assim que se
-  expressa *cotovelo/joelho sem hiperextensão* (pouca folga num sentido, muita no outro).
-* `stiffness` (0..1) — 1 corrige integralmente, 0 ignora, intermediários aplicam a correção de forma
-  **suave (slerp)**, nunca um corte seco.
+* `kind: cone` — limits the **total deviation** of the local rotation (in degrees). It is what stops
+  "head turning 180°" and gives the shoulder its **motion cone**.
+* `kind: x | y | z` — limits **one axis**, with **asymmetric** `min_deg`/`max_deg`: this is how you
+  express *elbow/knee without hyperextension* (little slack one way, a lot the other).
+* `stiffness` (0..1) — 1 corrects fully, 0 ignores, intermediate values apply the correction
+  **smoothly (slerp)**, never a hard cut.
 
-O relatório de cada execução traz, por osso: frames corrigidos, maior violação (graus) e correção
-média. Erros de configuração (`min_deg > max_deg`, `stiffness` fora de [0,1], osso inexistente,
-limites conflitantes) geram **mensagem clara** citando o osso e o campo.
+Each run's report carries, per bone: frames corrected, largest violation (degrees) and average
+correction. Configuration errors (`min_deg > max_deg`, `stiffness` outside [0,1], nonexistent bone,
+conflicting limits) produce a **clear message** citing the bone and the field.
 
 ---
 
-## 3. Editor de bone (keyframe rebakeado)
+## 3. Bone editor (rebaked keyframe)
 
-Cada edição é: **osso + frame alvo + novo valor + intervalo de frames afetados**.
+Every edit is: **bone + target frame + new value + affected frame range**.
 
 ```
 anchor_before ......... [ start ...... frame ...... end ] ......... anchor_after
-   (intacto)              ^-------- rebakeado --------^              (intacto)
+   (intact)               ^-------- rebaked ---------^              (intact)
 ```
 
-* no `frame` alvo a pose passa a ser a editada;
-* de `anchor_before` (= `start-1`) ao frame alvo, interpolação com **ease-in-out** (smoothstep:
-  derivada zero nas pontas → sem salto);
-* do frame alvo a `anchor_after` (= `end+1`), o mesmo na volta;
-* **frames fora de `[start, end]` ficam bit-exatamente iguais** (verificado por teste de diff).
+* at the target `frame` the pose becomes the edited one;
+* from `anchor_before` (= `start-1`) to the target frame, interpolation with **ease-in-out**
+  (smoothstep: zero derivative at the ends → no jump);
+* from the target frame to `anchor_after` (= `end+1`), the same on the way back;
+* **frames outside `[start, end]` stay bit-exactly the same** (verified by a diff test).
 
-Isso é o "sistema de keyframes" pedido, mas **rebakeado**: o arquivo final continua com uma pose por
-frame, sem curvas.
+This is the requested "keyframe system", but **rebaked**: the final file still has one pose per frame,
+without curves.
 
-### Histórico
+### History
 
-Toda edição entra em um histórico persistido (JSON) com osso, frame, intervalo, autor, nota e
-timestamp. Desfazer/refazer funcionam, e **fechar e reabrir a sessão mantém as edições aplicadas** —
-o clipe é reconstruído do original + histórico salvo.
+Every edit goes into a persisted history (JSON) with bone, frame, range, author, note and
+timestamp. Undo/redo work, and **closing and reopening the session keeps the edits applied** —
+the clip is rebuilt from the original + the saved history.
 
 ---
 
-## 4. Relatório comparativo
+## 4. Comparison report
 
-Para cada filtro aplicado ao **mesmo clipe**, medimos:
+For each filter applied to the **same clip**, we measure:
 
-| métrica | o que diz |
+| metric | what it says |
 |---|---|
-| `ganho_suavidade_%` | redução da energia do jerk (2ª derivada) — quanto mais alto, mais suave |
-| `atraso_frames` | defasagem via correlação cruzada (0 = sem atraso) |
-| `rmse` | desvio residual em relação ao sinal original |
-| `erro_angular_*_deg` | quanto a rotação de fato mudou (médio e máximo) |
+| `ganho_suavidade_%` | jerk energy (2nd derivative) reduction — the higher, the smoother |
+| `atraso_frames` | lag via cross-correlation (0 = no lag) |
+| `rmse` | residual deviation from the original signal |
+| `erro_angular_*_deg` | how much the rotation actually changed (mean and max) |
 
-Saída em tabela Markdown + JSON (`filtros_comparativo.md`, `refine_report.json`).
+Output as a Markdown table + JSON (`filtros_comparativo.md`, `refine_report.json`).
 
-Exemplo real (clipe sintético, 80 frames):
+Real example (synthetic clip, 80 frames):
 
 ```
 | filtro             | ganho_suavidade_% | atraso_frames | rmse     | erro_angular_medio_deg |
@@ -146,58 +149,58 @@ Exemplo real (clipe sintético, 80 frames):
 ## 5. CLI
 
 ```powershell
-# exemplos antes/depois + relatório comparativo (gera em storage/refine_samples/)
+# before/after examples + comparison report (written to storage/refine_samples/)
 .\.venv\Scripts\python.exe tools\refine.py --make-samples
 
-# aplica constraints + filtros e salva o clipe refinado (+ GLB/FBX)
+# applies constraints + filters and saves the refined clip (+ GLB/FBX)
 .\.venv\Scripts\python.exe tools\refine.py --input storage\refine_samples\sample_before.json `
     --constraints config\constraints_humanoid.yaml --filters config\filters_default.yaml `
     --out storage\refine_samples\refined
 
-# só compara filtros
+# compare filters only
 .\.venv\Scripts\python.exe tools\refine.py --input clipe.json --compare one_euro,savgol,kalman
 
-# injeta uma violação absurda (cabeça a 180°) para ver o preset corrigir
+# inject an absurd violation (head at 180°) to watch the preset fix it
 .\.venv\Scripts\python.exe tools\refine.py --input clipe.json --inject-violation head180 `
     --no-filters --out out/
 ```
 
 ---
 
-## 6. Uso como biblioteca
+## 6. Use as a library
 
 ```python
 from core.refine import refine_animation, boneedit as be
 
-refinado, relatorio = refine_animation(
+refined, report = refine_animation(
     anim,
     constraints_config="config/constraints_humanoid.yaml",
     filters_config="config/filters_default.yaml",
     edits=[be.BoneEdit(bone="Head", frame=30, rotation_euler_deg=[0, 30, 0], start=20, end=45)],
 )
 
-print(relatorio.stages)          # ['constraints', 'filters', 'edits']
-print(relatorio.constraints)     # frames corrigidos por osso
+print(report.stages)          # ['constraints', 'filters', 'edits']
+print(report.constraints)     # frames corrected per bone
 ```
 
-### Integração com o pipeline
+### Pipeline integration
 
-Basta passar `params.refine` no job — a camada roda **antes** do export:
+Just pass `params.refine` in the job — the layer runs **before** the export:
 
 ```json
 {"fps": 30, "refine": {"constraints": "config/constraints_humanoid.yaml",
                        "filters": "config/filters_default.yaml"}}
 ```
 
-Sem `params.refine`, o comportamento é exatamente o de antes.
+Without `params.refine`, the behavior is exactly as before.
 
 ---
 
-## 7. Editor na interface
+## 7. Editor in the interface
 
-`http://127.0.0.1:8000/refine` — mesma linguagem visual do pipeline:
+`http://127.0.0.1:8000/refine` — same visual language as the pipeline:
 
-* seleciona o clipe (jobs com `anim.json`), navega por frame, escolhe o osso e ajusta X/Y/Z;
-* define o **intervalo afetado** e aplica; a prévia 3D (esqueleto + malha) atualiza na hora;
-* desfazer/refazer/limpar, comparar filtros (tabela) e aplicar o refino (gera GLB/FBX refinados);
-* edita os limites de constraint e salva no YAML.
+* pick the clip (jobs with `anim.json`), navigate by frame, choose the bone and adjust X/Y/Z;
+* set the **affected range** and apply; the 3D preview (skeleton + mesh) updates instantly;
+* undo/redo/clear, compare filters (table) and apply the refinement (generates refined GLB/FBX);
+* edit the constraint limits and save them to the YAML.

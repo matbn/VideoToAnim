@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 
 from core import mixamo as mx
+from core import i18n as _i18n
 
 EXPECTED = set(mx.BONE_NAMES)
 
@@ -113,13 +114,265 @@ def extract_bone_names(path: str | Path, fmt: str | None = None) -> list[str]:
     return []
 
 
-def check_compatibility(path: str | Path) -> MeshReport:
+def _fbx_vec_prop(model, key: str):
+    """Vetor (3) de uma propriedade P do Properties70 (ex.: Lcl Translation)."""
+    p70 = model.child("Properties70")
+    if p70 is None:
+        return None
+    for p in p70.all("P"):
+        nm = p.p(0)
+        if isinstance(nm, bytes):
+            nm = nm.decode("utf-8", "replace")
+        if nm == key:
+            vals = p.props[-3:]
+            try:
+                return np.asarray([float(v) for v in vals], np.float64)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def mesh_bone_lengths(path: str | Path) -> dict[str, float]:
+    """Comprimentos (m) dos ossos do esqueleto DA PROPRIA MALHA (nome Mixamo).
+
+    O formato do rig Mixamo e padrao (nomes/hierarquia), mas cada personagem
+    tem comprimentos de osso proprios — por isso a anticolisao detecta os
+    tamanhos NOVAMENTE a cada execucao, a partir do arquivo da malha.
+
+    Convencao: comprimento de um osso = distancia da cabeca do osso ate a
+    cabeca do seu "filho de direcao" (a mesma do export). Essa distancia e
+    invariante a orientacao de rest, entao basta ler a translocacao local
+    (sem depender de rotacoes/PreRotation). Suporta FBX binario/ASCII e
+    GLB/glTF (unidades em metros, como no padrao glTF).
+
+    Devolve {} quando o formato nao permite leitura.
+    """
+    fmt = detect_format(path)
+    offsets: dict[str, np.ndarray] = {}
+    if fmt in ("fbx-binary", "fbx-ascii"):
+        from core.fbx import read_fbx, unit_scale_factor
+
+        root, _v = read_fbx(path)
+        obj = root.child("Objects")
+        if obj is None:
+            return {}
+        scale = unit_scale_factor(root) / 100.0
+        if scale <= 0:
+            scale = 0.01
+        for m in obj.all("Model"):
+            name = _strip_prefix(_fbx_name(m))
+            if name not in EXPECTED:
+                continue
+            t = _fbx_vec_prop(m, "Lcl Translation")
+            if t is not None:
+                offsets[name] = t * scale
+    elif fmt in ("glb", "gltf"):
+        from pygltflib import GLTF2
+
+        g = GLTF2().load(str(path))
+        for n in (g.nodes or []):
+            name = _strip_prefix(n.name or "")
+            if name in EXPECTED and n.translation is not None:
+                offsets[name] = np.asarray(n.translation, np.float64)
+    else:
+        return {}
+
+    lengths: dict[str, float] = {}
+    for bone, _off in offsets.items():
+        if mx.BONE_IS_END.get(bone):
+            continue
+        child = mx._first_child(bone)
+        if child and child in offsets:
+            comp = float(np.linalg.norm(offsets[child]))
+            if comp > 1e-6:
+                lengths[bone] = comp
+    return lengths
+
+
+def _quat_from_mat3(rm: np.ndarray) -> np.ndarray:
+    """Quaternion (x,y,z,w) a partir de uma matriz de rotacao 3x3."""
+    rm = np.asarray(rm, np.float64)
+    tr = rm[0, 0] + rm[1, 1] + rm[2, 2]
+    if tr > 0:
+        s = np.sqrt(tr + 1.0) * 2
+        q = [0.25 * s, (rm[2, 1] - rm[1, 2]) / s, (rm[0, 2] - rm[2, 0]) / s, (rm[1, 0] - rm[0, 1]) / s]
+    elif rm[0, 0] > rm[1, 1] and rm[0, 0] > rm[2, 2]:
+        s = np.sqrt(1.0 + rm[0, 0] - rm[1, 1] - rm[2, 2]) * 2
+        q = [(rm[2, 1] - rm[1, 2]) / s, 0.25 * s, (rm[0, 1] + rm[1, 0]) / s, (rm[0, 2] + rm[2, 0]) / s]
+    elif rm[1, 1] > rm[2, 2]:
+        s = np.sqrt(1.0 + rm[1, 1] - rm[0, 0] - rm[2, 2]) * 2
+        q = [(rm[0, 2] - rm[2, 0]) / s, (rm[0, 1] + rm[1, 0]) / s, 0.25 * s, (rm[1, 2] + rm[2, 1]) / s]
+    else:
+        s = np.sqrt(1.0 + rm[2, 2] - rm[0, 0] - rm[1, 1]) * 2
+        q = [(rm[1, 0] - rm[0, 1]) / s, (rm[0, 2] + rm[2, 0]) / s, (rm[1, 2] + rm[2, 1]) / s, 0.25 * s]
+    w, x, y, z = q
+    out = np.array([x, y, z, w], np.float64)
+    n = float(np.linalg.norm(out))
+    if n < 1e-12:
+        return np.array([0.0, 0.0, 0.0, 1.0])
+    out = out / n
+    if out[3] < 0.0:  # hemisferio estavel (w >= 0)
+        out = -out
+    return out
+
+
+def _mat_row_stored(m: np.ndarray) -> bool | None:
+    """True se a matriz 4x4 esta armazenada em convencao de LINHA (translacao na ultima linha)."""
+    if np.allclose(m[3, :], [0.0, 0.0, 0.0, 1.0], atol=1e-4):
+        return False
+    if np.allclose(m[:, 3], [0.0, 0.0, 0.0, 1.0], atol=1e-4):
+        return True
+    return None
+
+
+def mesh_skeleton(path: str | Path) -> dict | None:
+    """Esqueleto de REST do arquivo da malha (posicoes/rotacoes/pivos proprios).
+
+    O rig do Mixamo e padrao em nomes/hierarquia, mas cada personagem tem
+    TAMANHOS DE OSSO proprios (e a malha, em T-Pose, foi bindada neles). Para a
+    exportacao usar os PIVOS DA PROPRIA MALHA, le-se o bind do arquivo:
+      * FBX:  TransformLink dos clusters de skin (matriz de bind por osso);
+      * GLB:  skin.inverseBindMatrices (invertidas).
+    Deriva, pela hierarquia padrao, transformacoes locais (translacao/rotacao)
+    por osso e os offsets de mundo (usados tambem pela anticolisao).
+
+    Devolve dict com ok/n_bones/missing/bones ({nome: parent, translation,
+    rotation, world_pos, world_rot, world_offset}) — ou None se o formato nao
+    permitir a leitura (fallback: rig de referencia).
+    """
+    fmt = detect_format(path)
+    bone_world: dict[str, np.ndarray] = {}
+    source = ""
+    if fmt in ("fbx-binary", "fbx-ascii"):
+        from core.fbx import read_fbx, unit_scale_factor
+
+        root, _v = read_fbx(path)
+        obj = root.child("Objects")
+        connections = root.child("Connections")
+        if obj is None or connections is None:
+            return None
+        conns = [(c.p(1), c.p(2)) for c in connections.all("C")]
+        models = {m.p(0): m for m in obj.all("Model")}
+        defs = {d.p(0): d for d in obj.all("Deformer")}
+        by_src: dict = {}
+        by_dst: dict = {}
+        for s, d in conns:
+            by_src.setdefault(s, []).append(d)
+            by_dst.setdefault(d, []).append(s)
+        scale = unit_scale_factor(root) / 100.0
+        if scale <= 0:
+            scale = 0.01
+        raw: dict[str, np.ndarray] = {}
+        for skin_uid, d in defs.items():
+            if d.p(2) != b"Skin":
+                continue
+            for cl in by_dst.get(skin_uid, []):
+                cd = defs.get(cl)
+                if cd is None or cd.p(2) != b"Cluster":
+                    continue
+                bones = [x for x in by_dst.get(cl, []) if x in models] or \
+                        [x for x in by_src.get(cl, []) if x in models]
+                if not bones:
+                    continue
+                name = _strip_prefix(_fbx_name(models[bones[0]]))
+                if name not in EXPECTED:
+                    continue
+                tn = cd.child("TransformLink")
+                if tn is None or not tn.props:
+                    continue
+                arr = np.asarray(tn.props[0], np.float64)
+                if arr.size == 16:
+                    raw.setdefault(name, arr.reshape(4, 4))
+        if not raw:
+            return None
+        row_stored = None
+        for pick in ("Hips", "Spine", "LeftArm"):
+            if pick in raw:
+                row_stored = _mat_row_stored(raw[pick])
+                if row_stored is not None:
+                    break
+        if row_stored is None:
+            row_stored = False
+        for name, m in raw.items():
+            mc = m if not row_stored else m.T
+            mc = np.asarray(mc, np.float64).copy()
+            mc[:3, 3] = mc[:3, 3] * scale
+            bone_world[name] = mc
+        source = "fbx-clusters"
+    elif fmt in ("glb", "gltf"):
+        from pygltflib import GLTF2
+
+        g = GLTF2().load(str(path))
+        if not g.skins:
+            return None
+        skin = g.skins[0]
+        ibm = _read_accessor(g, skin.inverseBindMatrices).astype(np.float64)
+        ibm = ibm.reshape(-1, 4, 4).transpose(0, 2, 1)  # coluna -> linhas
+        for j, node_idx in enumerate(skin.joints):
+            name = _strip_prefix(g.nodes[node_idx].name or "")
+            if name in EXPECTED:
+                bone_world.setdefault(name, np.linalg.inv(ibm[j]))
+        source = "glb-ibm"
+    else:
+        return None
+
+    world_pos: dict[str, np.ndarray] = {}
+    world_rot: dict[str, np.ndarray] = {}
+    for name, w in bone_world.items():
+        world_pos[name] = np.asarray(w[:3, 3], np.float64).copy()
+        world_rot[name] = _quat_from_mat3(w[:3, :3])
+
+    bones: dict[str, dict] = {}
+    for name in mx.BONE_NAMES:
+        if name not in bone_world:
+            continue
+        parent = mx.BONE_PARENT[name]
+        pos = world_pos[name]
+        rot = world_rot[name]
+        if parent is not None and parent in bone_world:
+            pos_p = world_pos[parent]
+            rot_p = world_rot[parent]
+            t = mx.quat_rotate(mx.quat_conj(rot_p), pos - pos_p)
+            s = mx.quat_mul(mx.quat_conj(rot_p), rot)
+            wlcl = pos - pos_p
+        else:
+            t = pos.copy()
+            s = rot.copy()
+            wlcl = pos.copy()
+        bones[name] = {
+            "parent": parent,
+            "translation": t,
+            "rotation": s,
+            "world_pos": pos,
+            "world_rot": rot,
+            "world_offset": np.asarray(wlcl, np.float64),
+        }
+    missing = [b for b in mx.BONE_NAMES if b not in bones]
+    return {
+        "ok": not missing,
+        "source": source,
+        "n_bones": len(bones),
+        "missing": missing,
+        "bones": bones,
+    }
+
+
+def mesh_rig_offsets(rig: dict | None) -> dict[str, np.ndarray] | None:
+    """Offsets de mundo por osso do rig da malha (None se invalido)."""
+    if not rig or not rig.get("ok"):
+        return None
+    return {b: np.asarray(v["world_offset"], np.float64)
+            for b, v in rig["bones"].items()}
+
+
+def check_compatibility(path: str | Path, lang: str | None = None) -> MeshReport:
     """Compara o esqueleto da malha com o contrato Mixamo de 65 ossos."""
+    _L = _i18n.norm_lang(lang)
     path = Path(path)
     rep = MeshReport()
     rep.format = detect_format(path)
     if rep.format == "unknown":
-        rep.messages.append("formato nao reconhecido: use GLB/glTF ou FBX do Mixamo.")
+        rep.messages.append(_i18n.fmt("mesh.fmt_unknown", _L))
         return rep
 
     bones = extract_bone_names(path, rep.format)
@@ -137,15 +390,14 @@ def check_compatibility(path: str | Path) -> MeshReport:
         rep.attachable = rep.compatible
     else:
         rep.attachable = False
-        rep.messages.append("formato de malha nao suportado para anexo (use FBX ou GLB).")
+        rep.messages.append(_i18n.fmt("mesh.attach_format", _L))
 
     if not rep.compatible:
-        rep.messages.append(
-            f"esqueleto incompativel: {len(missing_animated)} ossos exigidos ausentes "
-            f"(ex.: {', '.join(missing_animated[:6])})."
-        )
+        rep.messages.append(_i18n.fmt(
+            "mesh.incompatible", _L, n=len(missing_animated),
+            list=", ".join(missing_animated[:6])))
     if rep.extra:
-        rep.messages.append(f"{len(rep.extra)} ossos fora do padrao Mixamo (ignorados).")
+        rep.messages.append(_i18n.fmt("mesh.extra", _L, n=len(rep.extra)))
     return rep
 
 

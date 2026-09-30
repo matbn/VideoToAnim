@@ -93,22 +93,33 @@ class AnalyticLifter(Lifter):
         p: dict[int, np.ndarray] = {i: to_plane(i) for i in range(kp.shape[0])}
         mh3 = to_plane(ci["left_hip"]) * 0.5 + to_plane(ci["right_hip"]) * 0.5
 
-        def solve(name: str, parent: np.ndarray, child_idx: int, length: float) -> np.ndarray:
+        def solve(name: str, parent: np.ndarray, child, length: float) -> np.ndarray:
+            # `child` pode ser o INDICE de uma junta (usa p[child]) ou um ponto
+            # explicito (np.ndarray) — o centro dos ombros e um ponto medio.
+            is_idx = isinstance(child, (int, np.integer))
+            target = p[child] if is_idx else child
             sign = state.get(name, self._prefer.get(name, 1.0))
-            newc = _solve_depth(parent, p[child_idx], length, sign)
+            newc = _solve_depth(parent, target, length, sign)
             prev_z = state.get(name + "_z")
             if prev_z is not None:
-                alt = _solve_depth(parent, p[child_idx], length, -sign)
+                alt = _solve_depth(parent, target, length, -sign)
                 if abs(alt[2] - prev_z) < abs(newc[2] - prev_z):
                     newc = alt
                     sign = -sign
             state[name] = sign
             state[name + "_z"] = float(newc[2])
-            p[child_idx] = newc
+            if is_idx:
+                p[child] = newc
             return newc
 
-        # coluna: quadril -> centro dos ombros
-        center_sh = solve("spine", mh3, ci["left_shoulder"], _BONE["spine"])
+        # coluna: quadril -> CENTRO dos ombros (o ponto medio dos ombros).
+        # O codigo antigo mirava o ombro ESQUERDO: o centro do peito saia ~0.18 m
+        # deslocado para a esquerda e o tronco inteiro ficava inclinado ~24° em
+        # TODOS os frames (relatado: "os corpos pendem para o lado"). O ponto
+        # medio fica exatamente a distancia definida por _scale do quadril
+        # (d==L), sem vies lateral e sem componente de profundidade espuria.
+        mid_sh_pt = (to_plane(ci["left_shoulder"]) + to_plane(ci["right_shoulder"])) * 0.5
+        center_sh = solve("spine", mh3, mid_sh_pt, _BONE["spine"])
         # ombros a partir do centro do torax (largura fixa em X)
         half = _BONE["shoulder_w"] / 2.0
         p[ci["left_shoulder"]] = center_sh + np.array([half, 0.0, 0.0])

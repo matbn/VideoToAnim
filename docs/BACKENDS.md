@@ -1,82 +1,86 @@
 # Backends
 
-Esqueleto canônico de todos: **COCO-17**, pixel absoluto, y para baixo, score [0,1].
-A **categoria de licença** de cada um aparece no dropdown (ver `docs/LICENSING.md`).
+## Português
 
-O dropdown mostra 10 backends; `synthetic` fica oculto (infra de teste).
+Este documento também está disponível em português: [BACKENDS.pt-BR.md](BACKENDS.pt-BR.md).
 
-## `livre` — pode usar comercialmente
+Canonical skeleton for all of them: **COCO-17**, absolute pixels, y down, score [0,1].
+Each one's **license category** appears in the dropdown (see `docs/LICENSING.md`).
 
-### `vitpose` — ViTPose (**padrão**)
+The dropdown shows 10 backends; `synthetic` stays hidden (test infra).
+
+## `livre` — commercial use allowed
+
+### `vitpose` — ViTPose (**default**)
 
 | | |
 |---|---|
-| Tipo | top-down, heatmap, single-frame |
-| Instalação | **`pip install onnxruntime`** — o modelo (~83 MB) é baixado na 1ª execução |
-| Motor | ONNX Runtime em CPU (**~60 ms/frame** medido) |
-| Detector | sem detector usa o frame inteiro (aceita `params.bbox`) |
-| Licença | **Apache-2.0** |
+| Type | top-down, heatmap, single-frame |
+| Install | **`pip install onnxruntime`** — the model (~83 MB) is downloaded on first run |
+| Engine | ONNX Runtime on CPU (**~60 ms/frame** measured) |
+| Detector | none — uses the whole frame (accepts `params.bbox`) |
+| License | **Apache-2.0** |
 
-> **Por que ONNX e não MMPose:** `mmcv` não publica wheel para Python 3.13 (medido com
-> `pip download mmcv --only-binary=:all:` → *No matching distribution found*). O caminho MMPose
-> segue disponível como legado (`params.engine = "mmpose"`) em Python ≤ 3.12.
+> **Why ONNX and not MMPose:** `mmcv` does not publish a wheel for Python 3.13 (measured with
+> `pip download mmcv --only-binary=:all:` → *No matching distribution found*). The MMPose path
+> remains available as legacy (`params.engine = "mmpose"`) on Python ≤ 3.12.
 
 ### `mediapipe` — MediaPipe Pose (BlazePose)
 
-Detector+tracker single-person. 33 pontos → COCO-17. `pose_world_landmarks` dá 3D em metros
-(dispensa o lifter). **Apache-2.0.**
+Single-person detector+tracker. 33 points → COCO-17. `pose_world_landmarks` gives 3D in meters
+(skips the lifter). **Apache-2.0.**
 
 ### `rtmpose` — RTMPose (rtmlib, ONNX)
 
 | | |
 |---|---|
-| Tipo | top-down SoTA "leve", COCO-17 nativo |
-| Instalação | **`pip install rtmlib --no-deps`** (usa o onnxruntime já instalado) |
-| Modelo | ONNX oficial (~48 MB) baixado na 1ª execução |
-| Desempenho | **~200 ms/frame** em CPU (medido) |
-| Licença | **Apache-2.0** (RTMPose/OpenMMLab) · `rtmlib` MIT |
+| Type | top-down "light" SoTA, COCO-17 native |
+| Install | **`pip install rtmlib --no-deps`** (uses the already-installed onnxruntime) |
+| Model | official ONNX (~48 MB) downloaded on first run |
+| Performance | **~200 ms/frame** on CPU (measured) |
+| License | **Apache-2.0** (RTMPose/OpenMMLab) · `rtmlib` MIT |
 
-### `motionbert` — MotionBERT (lifting 2D→3D)
+### `motionbert` — MotionBERT (2D→3D lifting)
 
-Backbone unificado (ICCV 2023), referência em lifting. H36M-17, janela temporal.
-**Apache-2.0** (código e pesos do repo oficial). Requer torch + pesos.
+Unified backbone (ICCV 2023), a reference in lifting. H36M-17, temporal window.
+**Apache-2.0** (code and weights from the official repo). Requires torch + weights.
 
-## `licenca_a_parte` — avalie antes de usar
+## `licenca_a_parte` — assess before using
 
-| backend | por quê |
+| backend | why |
 |---|---|
-| `yolopose` (Ultralytics) | **AGPL-3.0**: copyleft forte; produto/serviço exige abrir código ou licença Enterprise |
-| `sam3dbody` (Meta, MHR) | **SAM License**: uso comercial permitido, mas share-alike + restrições de export/militar |
-| `mhformer` | código MIT, **pesos sem licença declarada** (all rights reserved por padrão) |
+| `yolopose` (Ultralytics) | **AGPL-3.0**: strong copyleft; a product/service requires open-sourcing or an Enterprise license |
+| `sam3dbody` (Meta, MHR) | **SAM License**: commercial use allowed, but share-alike + export/military restrictions |
+| `mhformer` | MIT code, **weights with no declared license** (all rights reserved by default) |
 
-## `nao_comercial` — só pesquisa
+## `nao_comercial` — research only
 
-| backend | por quê |
+| backend | why |
 |---|---|
-| `openpose` | LICENSE da CMU: *"ACADEMIC OR NON-PROFIT ORGANIZATION NONCOMMERCIAL RESEARCH USE ONLY"* (código **e** pesos) |
-| `simplebaseline` | código MIT, mas *"All models are provided for research purpose"* |
-| `wham` | código MIT, mas depende do **SMPL/SMPL-X** (licença non-commercial da Max Planck) |
+| `openpose` | CMU LICENSE: *"ACADEMIC OR NON-PROFIT ORGANIZATION NONCOMMERCIAL RESEARCH USE ONLY"* (code **and** weights) |
+| `simplebaseline` | MIT code, but *"All models are provided for research purpose"* |
+| `wham` | MIT code, but depends on **SMPL/SMPL-X** (Max Planck non-commercial license) |
 
-## Oculto
+## Hidden
 
-`synthetic` — gerado do próprio rig Mixamo, determinístico, sem dependências. **MIT** (deste
-projeto). Fica fora do dropdown (`hidden_from_ui`) mas segue no registry para os testes; a matriz de
-testes o usa como referência do contrato do Adapter.
+`synthetic` — generated from the Mixamo rig itself, deterministic, no dependencies. **MIT** (this
+project). It stays out of the dropdown (`hidden_from_ui`) but remains in the registry for the tests;
+the backend-matrix test uses it as the Adapter contract reference.
 
-## Estado de execução nesta máquina
+## Runtime state on this machine
 
-| backend | disponível | observação |
+| backend | available | note |
 |---|---|---|
-| `vitpose` | ✅ | roda (ONNX, CPU) |
-| `mediapipe` | ✅ | roda (Tasks API, CPU) |
-| `rtmpose` | ✅ | roda (rtmlib, CPU) |
-| `motionbert` | ❌ | requer torch + pesos |
-| `yolopose` | ❌ | requer `pip install ultralytics` |
-| `sam3dbody` | ❌ | requer pacote/checkpoint oficiais |
-| `wham` | ❌ | requer repo + corpo SMPL |
-| `openpose` | ❌ | requer build C++ |
-| `simplebaseline` | ❌ | requer repo + checkpoint |
-| `mhformer` | ❌ | requer repo + pesos |
+| `vitpose` | ✅ | runs (ONNX, CPU) |
+| `mediapipe` | ✅ | runs (Tasks API, CPU) |
+| `rtmpose` | ✅ | runs (rtmlib, CPU) |
+| `motionbert` | ❌ | requires torch + weights |
+| `yolopose` | ❌ | requires `pip install ultralytics` |
+| `sam3dbody` | ❌ | requires the official package/checkpoint |
+| `wham` | ❌ | requires repo + SMPL body |
+| `openpose` | ❌ | requires a C++ build |
+| `simplebaseline` | ❌ | requires repo + checkpoint |
+| `mhformer` | ❌ | requires repo + weights |
 
-Os indisponíveis aparecem no dropdown com o motivo exato — e todos atravessam o pipeline no teste de
-matriz (`tests/test_backend_matrix.py`), que exercita o **mapeamento real** de cada adapter.
+The unavailable ones appear in the dropdown with the exact reason — and all of them cross the pipeline
+in the matrix test (`tests/test_backend_matrix.py`), which exercises each adapter's **real mapping**.

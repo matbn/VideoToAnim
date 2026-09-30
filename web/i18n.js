@@ -13,6 +13,12 @@ const DICT = {
     'nav.checking': 'verificando…',
     'ui.syncRot': 'sync rotation',
     'ui.syncRotTitle': 'sincroniza a câmera entre o esqueleto e a malha',
+    'ui.kpOverlay': 'esqueleto + mãos (debug)',
+    'ui.kpOverlayTitle': 'desenha os keypoints detectados (esqueleto 2D e mãos) sobre o vídeo (debug)',
+    'ui.boneLabels': 'nomes dos bones',
+    'ui.boneLabelsTitle': 'mostra o nome de cada osso no painel 3D',
+    'ui.kpUnavailable': 'sem keypoints salvos neste job (reprocesse para gerar)',
+    'viewer.no3d': '3D indisponível (sem WebGL neste navegador). Vídeo, histórico e downloads seguem funcionando.',
     'st.done': 'concluído',
     'st.error': 'erro',
     'st.running': 'executando',
@@ -118,6 +124,11 @@ const DICT = {
     'be.installable': 'instalável',
     'be.manual': 'passo manual',
     'be.counts': '{n} backends · padrão: {def}',
+    'be.loading': 'carregando backends…',
+    'form.collision': 'anticolisão — evita membros atravessando o tronco (usa o tamanho dos ossos da malha)',
+    'form.collisionTitle': 'detecta o tamanho dos ossos da malha antes de cada execução e desvia membros que invadem outros; desligue para comparar',
+    'form.collisionShort': 'anticolisão',
+    'ref.collisionLog': 'anticolisão: {n} frames com correção ({corrections} ajustes, máx {max_deg}°, esqueleto: {source})',
     'be.preferredMissing': '({name} indisponível)',
     'be.hidden': '{n} oculto(s)',
     'hint.license': 'licença: {cat}',
@@ -240,6 +251,12 @@ const DICT = {
     'nav.checking': 'checking…',
     'ui.syncRot': 'sync rotation',
     'ui.syncRotTitle': 'syncs the camera between the skeleton and the mesh',
+    'ui.kpOverlay': 'skeleton + hands (debug)',
+    'ui.kpOverlayTitle': 'draws the detected keypoints (2D skeleton and hands) over the video (debug)',
+    'ui.boneLabels': 'bone names',
+    'ui.boneLabelsTitle': 'shows each bone name in the 3D pane',
+    'ui.kpUnavailable': 'no keypoints saved for this job (reprocess to generate)',
+    'viewer.no3d': '3D unavailable (no WebGL in this browser). Video, history and downloads keep working.',
     'st.done': 'done',
     'st.error': 'error',
     'st.running': 'running',
@@ -344,6 +361,11 @@ const DICT = {
     'be.installable': 'auto-installable',
     'be.manual': 'manual step',
     'be.counts': '{n} backends · default: {def}',
+    'be.loading': 'loading backends…',
+    'form.collision': 'anti-clipping — keeps limbs from crossing the torso (uses mesh bone sizes)',
+    'form.collisionTitle': 'measures mesh bone sizes before each run and steers limbs that invade others; turn off to compare',
+    'form.collisionShort': 'anti-clipping',
+    'ref.collisionLog': 'collision: {n} frames corrected ({corrections} adjustments, max {max_deg}°, skeleton: {source})',
     'be.preferredMissing': '({name} unavailable)',
     'be.hidden': '{n} hidden',
     'hint.license': 'license: {cat}',
@@ -507,6 +529,14 @@ export function langSwitcher(id) {
     b.addEventListener('click', () => {
       if (l === lang) return;
       setLang(l);
+      // US-08: em navegadores sem localStorage (storage bloqueado), persiste
+      // a escolha na propria URL (?lang=) -- o reload mantem o idioma.
+      try {
+        const u = new URL(location.href);
+        u.searchParams.set('lang', l);
+        location.replace(u.toString());
+        return;
+      } catch (e) { /* url indisponivel: cai no reload simples */ }
       location.reload();
     });
     host.appendChild(b);

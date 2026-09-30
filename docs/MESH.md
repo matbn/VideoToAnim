@@ -1,114 +1,118 @@
-# Usar uma malha (personagem) Mixamo no output
+# Using a Mixamo mesh (character) in the output
 
-Por padrão o GLB exportado usa uma malha de **“capsule sticks”** (um cilindro fino por osso) só
-para visualizar o movimento. Você pode enviar um personagem seu — **FBX ou glTF/GLB** — e a
-animação será aplicada **na malha dele**.
+## Português
 
-Não é preciso converter: o Mixamo exporta FBX por padrão e o FBX é lido **direto**, sem Blender
-nem FBX SDK.
+Este documento também está disponível em português: [MESH.pt-BR.md](MESH.pt-BR.md).
 
-## Como usar
+By default the exported GLB uses a **"capsule sticks"** mesh (a thin cylinder per bone) just
+to visualize the motion. You can upload your own character — **FBX or glTF/GLB** — and the
+animation will be applied **to its mesh**.
 
-1. Na interface, campo **“Malha Mixamo (opcional)”**, envie o arquivo (`.fbx` ou `.glb`).
-2. O job roda normalmente; no painel de Job aparece um bloco **“Esqueleto da malha”** com o veredito.
+No conversion needed: Mixamo exports FBX by default and the FBX is read **directly**, without
+Blender or the FBX SDK.
 
-## O que o software verifica
+## How to use
 
-O esqueleto do arquivo é comparado com o **contrato Mixamo de 65 ossos** (`Hips, Spine, Spine1,
+1. In the interface, the **"Mixamo mesh (optional)"** field: upload the file (`.fbx` or `.glb`).
+2. The job runs as usual; the Job panel shows a **"Mesh skeleton"** block with the verdict.
+
+## What the software checks
+
+The file's skeleton is compared against the **65-bone Mixamo contract** (`Hips, Spine, Spine1,
 Spine2, Neck, Head, HeadTop_End, LeftShoulder, LeftArm, …, LeftHandPinky4, LeftUpLeg, …, RightToe_End`),
-aceitando o prefixo `mixamorig:` com ou sem dois-pontos.
+accepting the `mixamorig:` prefix with or without the colon.
 
-| campo do relatório | significado |
+| report field | meaning |
 |---|---|
-| `matched` | quantos ossos do seu arquivo casam com o contrato (o ideal é 65) |
-| `missing` | ossos exigidos que faltam |
-| `extra` | ossos fora do padrão (ignorados — ex.: acessórios) |
-| `compatible` | o esqueleto serve para receber a animação |
-| `attachable` | a malha foi **de fato** usada no GLB de saída |
-| `stats` | sub-malhas, vértices e quantos ficaram **sem peso** |
+| `matched` | how many bones in your file match the contract (65 is ideal) |
+| `missing` | required bones that are missing |
+| `extra` | bones outside the standard (ignored — e.g., props) |
+| `compatible` | the skeleton can receive the animation |
+| `attachable` | the mesh was **actually** used in the output GLB |
+| `stats` | sub-meshes, vertices and how many ended up **unweighted** |
 
-Só end-caps ausentes (ex.: `LeftToe_End`) são tolerados; a falta de um osso **animado** reprova a
-malha. Quando reprova, a interface mostra o motivo e o pipeline **não quebra**: volta para os
-capsule sticks e informa.
+Only missing end-caps (e.g., `LeftToe_End`) are tolerated; a missing **animated** bone rejects the
+mesh. When rejected, the interface shows the reason and the pipeline **does not break**: it falls
+back to the capsule sticks and reports it.
 
-## Formatos
+## Formats
 
-| formato | compatibilidade | anexo ao output |
+| format | compatibility | attach to the output |
 |---|---|---|
-| **FBX binário** (padrão do Mixamo) | sim | **sim** — leitor próprio em Python (`core/fbx.py`) |
-| **FBX ASCII** (outra opção do Mixamo) | sim | **sim** — mesmo leitor, mesma árvore de nós |
-| **GLB / glTF** | sim | **sim** — re-skin via `pygltflib` |
+| **FBX binary** (Mixamo's default) | yes | **yes** — own reader in Python (`core/fbx.py`) |
+| **FBX ASCII** (another Mixamo option) | yes | **yes** — same reader, same node tree |
+| **GLB / glTF** | yes | **yes** — re-skin via `pygltflib` |
 
-## Diagnóstico antes de processar
+## Diagnostics before processing
 
-O campo de malha tem o botão **“Verificar malha”**, que chama `POST /api/mesh/inspect` e responde
-**sem processar o vídeo**: formato detectado, ossos casados/faltando, se é compatível e se o anexo
-funciona (vértices e triângulos lidos). É o caminho mais rápido para entender por que uma malha não
-entrou, sem esperar um job inteiro.
+The mesh field has the **"Check mesh"** button, which calls `POST /api/mesh/inspect` and answers
+**without processing the video**: detected format, matched/missing bones, whether it is compatible
+and whether attaching works (vertices and triangles read). It is the fastest way to understand why
+a mesh was not used, without waiting for a whole job.
 
-Erros comuns já tratados com mensagem clara:
+Common errors already handled with a clear message:
 
-| sintoma | mensagem |
+| symptom | message |
 |---|---|
-| FBX exportado **sem skin** (opção “Without Skin” do Mixamo) | *“o FBX nao tem skin … baixe com 'Skin: With Skin'”* |
-| esqueleto incompleto/renomeado | lista os ossos ausentes |
-| arquivo não reconhecido | informa que não é FBX/GLB |
+| FBX exported **without skin** (Mixamo's "Without Skin" option) | *"the FBX has no skin … download with 'Skin: With Skin'"* |
+| incomplete/renamed skeleton | lists the missing bones |
+| unrecognized file | reports that it is not FBX/GLB |
 
-## Como funciona o anexo
+## How the attach works
 
-Em ambos os casos as juntas são remapeadas **pelo nome** para o nosso rig, os pesos são
-normalizados por vértice (top-4 influências) e as **inverseBindMatrices são recalculadas** a partir
-do nosso rest pose. Por isso a malha fica correta na T-pose mesmo que as proporções do seu
-personagem sejam diferentes das nossas.
+In both cases the joints are remapped **by name** to our rig, the weights are normalized per vertex
+(top-4 influences) and the **inverseBindMatrices are recomputed** from our rest pose. That is why the
+mesh is correct in the T-pose even if your character's proportions differ from ours.
 
-### FBX binário (leitor próprio)
+### FBX binary (own reader)
 
-`core/fbx.py` parseia a árvore de nós do FBX 7.x (offsets de 32/64 bits conforme a versão, arrays
-com deflate, registro nulo como terminador) e `load_fbx_mesh` extrai:
+`core/fbx.py` parses the FBX 7.x node tree (32/64-bit offsets depending on the version, deflated
+arrays, the null record as terminator) and `load_fbx_mesh` extracts:
 
-- `Objects → Geometry`: `Vertices` (control points) e `PolygonVertexIndex` (triangulado por leque);
-- `Objects → Deformer`: `Skin` e `Cluster` (`Indexes` + `Weights`);
-- `Connections`: o `Skin` aponta para a `Geometry`; cada `Cluster` aponta para o `Skin` e o osso
-  (`Model`) é ligado ao cluster;
-- `GlobalSettings.UnitScaleFactor`: converte a unidade do FBX (cm) para metros.
+- `Objects → Geometry`: `Vertices` (control points) and `PolygonVertexIndex` (fan-triangulated);
+- `Objects → Deformer`: `Skin` and `Cluster` (`Indexes` + `Weights`);
+- `Connections`: the `Skin` points to the `Geometry`; each `Cluster` points to the `Skin` and the
+  bone (`Model`) is linked to the cluster;
+- `GlobalSettings.UnitScaleFactor`: converts the FBX unit (cm) to meters.
 
-Um `Cluster` **sem** `Indexes`/`Weights` é tratado como **osso que não influencia o mesh** e é
-ignorado. Isso importa: o Mixamo emite um cluster para **todo** osso do esqueleto, e os que não
-pesam em nada vêm vazios. Tratá-los como “influencia todos” (a leitura literal da doc do FBX) fazia
-os 12 clusters vazios do corpo ganharem peso 1.0 em **todos** os 6.658 vértices e dominarem a
-seleção top-4 — o corpo ficava preso a **pontas de dedo** em vez de Hips/Spine/pernas, e a malha
-não se movia como deveria. Vértices sem nenhum peso caem no `Hips` e são contados em
-`stats.unweighted`; clusters vazios ignorados aparecem em `stats.empty_clusters`.
+A `Cluster` **without** `Indexes`/`Weights` is treated as a **bone that does not influence the mesh**
+and is ignored. This matters: Mixamo emits a cluster for **every** bone of the skeleton, and the ones
+that weigh nothing come out empty. Treating them as "influences everything" (the literal reading of
+the FBX docs) made the body's 12 empty clusters gain weight 1.0 on **all** 6,658 vertices and
+dominate the top-4 selection — the body got stuck to **finger tips** instead of Hips/Spine/legs, and
+the mesh did not move the way it should. Vertices with no weight at all fall back to `Hips` and are
+counted in `stats.unweighted`; ignored empty clusters appear in `stats.empty_clusters`.
 
-## Verificar que a malha realmente deforma
+## Checking that the mesh actually deforms
 
-Um GLB pode estar estruturalmente correto e mesmo assim não se mover. Para medir de verdade, o
-projeto traz `tools/verify_glb_skinning.py`, que aplica a fórmula de skinning do glTF 2.0 em dois
-instantes (t=0 e t=duração/2) e informa o deslocamento dos vértices:
+A GLB can be structurally correct and still not move. To measure it for real, the project ships
+`tools/verify_glb_skinning.py`, which applies the glTF 2.0 skinning formula at two instants
+(t=0 and t=duration/2) and reports the vertex displacement:
 
 ```powershell
-.\\.venv\\Scripts\\python.exe tools\\verify_glb_skinning.py storage\\jobs\\<id>\\model.glb
+.\.venv\Scripts\python.exe tools\verify_glb_skinning.py storage\jobs\<id>\model.glb
 ```
 
-Ele mostra juntas em uso, distribuição de influências, normalização de pesos e o deslocamento
-(`>>> RESULTADO: a malha DEFORMA corretamente`). No seu `MixamoChar.fbx`: **53 juntas em uso**,
-pesos normalizados, 0 sem peso, e ~89% dos vértices amostrados se deslocam entre os dois instantes.
+It shows joints in use, influence distribution, weight normalization and the displacement
+(`>>> RESULTS: the mesh DEFORMS correctly`). In your `MixamoChar.fbx`: **53 joints in use**,
+normalized weights, 0 unweighted, and ~89% of the sampled vertices move between the two instants.
 
 ### GLB / glTF
 
-Lê `skins[0].joints`, casa pelo nome e reaproveita `POSITION`, `JOINTS_0`, `WEIGHTS_0` e `indices`.
+Reads `skins[0].joints`, matches by name and reuses `POSITION`, `JOINTS_0`, `WEIGHTS_0` and `indices`.
 
-## Testado com o seu arquivo
+## Tested with your file
 
-`MixamoChar.fbx` (5,4 MB, FBX 7700): **65/65 ossos casados**, compatível, anexada — 6 sub-malhas,
-9.285 vértices, **0 sem peso**, altura 1,80 m, envergadura 1,96 m. O GLB final saiu com esses
-9.285 vértices (contra 624 dos capsule sticks).
+`MixamoChar.fbx` (5.4 MB, FBX 7700): **65/65 bones matched**, compatible, attached — 6 sub-meshes,
+9,285 vertices, **0 unweighted**, height 1.80 m, arm span 1.96 m. The final GLB came out with those
+9,285 vertices (against 624 for the capsule sticks).
 
-## Limitações
+## Limitations
 
-- A malha precisa ter **skinning** — um arquivo sem skin é recusado com mensagem clara.
-- Vértices com peso em uma junta que não existe no nosso rig são recusados (aviso), em vez de
-  deformar silenciosamente.
-- Sem suporte a blend shapes / morph targets e sem materiais/texturas no preview.
-- FBX **ASCII** é lido normalmente. O caso que ainda não funciona é **sem skin** (exportar do
-  Mixamo sem marcar “With Skin”) — aí não há como ancorar a animação e o software avisa.
+- The mesh must have **skinning** — a file without skin is rejected with a clear message.
+- Vertices weighted to a joint that does not exist in our rig are rejected (with a warning),
+  instead of deforming silently.
+- No support for blend shapes / morph targets, and no materials/textures in the preview.
+- **ASCII** FBX is read normally. The case that still does not work is **without skin** (exporting
+  from Mixamo without checking "With Skin") — there is no way to anchor the animation, and the
+  software warns about it.

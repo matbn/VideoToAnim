@@ -13,9 +13,19 @@ Como funciona o mapeamento (21 landmarks -> 4 ossos por dedo do nosso rig):
     mindinho    17 18 19 20
     polegar     1(CMC) 2(MCP) 3(IP) 4(TIP)
 
-Cada osso recebe a rotacao que leva a direcao de rest (offset do rig) ate a
-direcao da falange, expressa no referencial da MAO (montado com punho, MCP do
-indicador e MCP do mindinho) — que e o referencial do osso `Hand` no nosso rig.
+Mapeamento matematico (o rig compoe rot[osso] = rot[pai] * q; a direcao de um
+subtree = rot * offset_do_filho, com offsets de rest no frame do pai):
+
+    q1 = from_to(o2, rh^-1 . t1)              # osso 1 (MCP): falange MCP->PIP
+    q2 = from_to(o3, (rh . q1)^-1 . t2)       # osso 2 (PIP): falange PIP->DIP
+    q3 = from_to(o4, (rh . q1 . q2)^-1 . t3)  # osso 3 (DIP): falange DIP->TIP
+
+onde oI = BONE_OFFSET do osso FILHO (o rest da falange), tI = direcao observada
+no frame canonico do video (y-up, +Z frente — mesma conversao do backend) e
+rh = rotacao MUNDO da mao vinda do retarget do corpo NAQUELE frame. A versao
+antiga ignorava rh e montava um "referencial da mao" com os proprios landmarks
+(sem relacao com o frame do rig) — alem do indice do osso ser sempre 0
+("HandXxxxx0" nao existe), o que descartava tudo em silencio.
 """
 from __future__ import annotations
 
@@ -40,62 +50,92 @@ FINGERS = {
 THUMB = (1, 2, 3, 4)          # CMC, MCP, IP, TIP
 
 
-def _hand_frame(lm: np.ndarray) -> np.ndarray:
-    """Base ortonormal da mao: x = punho->MCP indicador, z = normal da palma."""
-    wrist = lm[0]
-    x = lm[5] - wrist
-    nx = np.linalg.norm(x)
-    x = x / nx if nx > 1e-9 else np.array([1.0, 0.0, 0.0])
-    v = lm[17] - wrist
-    z = np.cross(x, v)
-    nz = np.linalg.norm(z)
-    z = z / nz if nz > 1e-9 else np.array([0.0, 0.0, 1.0])
-    y = np.cross(z, x)
-    return np.stack([x, y, z], axis=0)      # linhas = eixos
+def _hand_world_rot(rotations: dict, t: int, side: str) -> np.ndarray:
+    """Rotacao MUNDO do osso {side}Hand no frame `t` (produto dos locais ate a raiz)."""
+    chain = []
+    p = f"{side}Hand"
+    while p is not None:
+        chain.append(p)
+        p = mx.BONE_PARENT.get(p)
+    q = np.array([0.0, 0.0, 0.0, 1.0])
+    for b in reversed(chain):
+        series = rotations.get(b)
+        if series is None:
+            continue
+        q = mx.quat_mul(q, np.asarray(series[t], np.float64))
+    return q
 
 
-def finger_rotations_from_landmarks(lm_world: np.ndarray, side: str) -> dict[str, np.ndarray]:
-    """Rotacoes locais dos dedos a partir dos world landmarks (21,3).
+def _to_canonical(lm: np.ndarray) -> np.ndarray:
+    """World landmarks do MediaPipe -> frame canonico (y-up, +Z frente)."""
+    lm = np.asarray(lm, np.float64)
+    return np.stack([lm[:, 0], -lm[:, 1], -lm[:, 2]], axis=1)
 
-    `side` e "Left" ou "Right" (prefixo dos ossos do rig).
-    Devolve {nome_do_osso: quaternion local}.
+
+def finger_rotations_from_landmarks(lm_world: np.ndarray, side: str,
+                                    hand_world_rot: np.ndarray | None = None
+                                    ) -> dict[str, np.ndarray]:
+    """Rotacoes LOCAIS dos dedos a partir dos world landmarks (21,3).
+
+    `side` e "Left"/"Right" (prefixo dos ossos). `hand_world_rot` e a rotacao
+    MUNDO da mao vinda do retarget do corpo no mesmo frame; e ela que amarra o
+    frame canonico do video ao referencial do rig (sem ela, assume identidade —
+    so para testes isolados).
     """
-    lm = np.asarray(lm_world, np.float64)
-    # MediaPipe: y para baixo e z para a camera -> nosso referencial (y-up, +Z frente)
-    lm = np.stack([lm[:, 0], -lm[:, 1], -lm[:, 2]], axis=1)
-    base = _hand_frame(lm)
+    lm = _to_canonical(lm_world)
+    rh = np.array([0.0, 0.0, 0.0, 1.0]) if hand_world_rot is None \
+        else np.asarray(hand_world_rot, np.float64)
+    nr = np.linalg.norm(rh)
+    if nr > 0:
+        rh = rh / nr
     rot: dict[str, np.ndarray] = {}
 
-    def add(finger: str, joints: tuple[int, int, int, int], thumb: bool) -> None:
-        a, b, c, d = joints
-        if thumb:
-            pares = [(0, 1, a, b), (0, 2, b, c), (0, 3, c, d)]
-        else:
-            pares = [(0, 1, a, b), (0, 2, b, c), (0, 3, c, d)]
-        for idx, _i, p, q in pares:
+    def add(finger: str, joints: tuple[int, int, int, int]) -> None:
+        j = list(joints)
+        q_prev = rh          # rotacao MUNDO acumulada do PAI do osso atual
+        for idx in (1, 2, 3):
             bone = f"{side}Hand{finger}{idx}"
             if bone not in mx.BONE_INDEX:
+                break
+            child = f"{side}Hand{finger}{idx + 1}"
+            rest = np.asarray(mx.BONE_OFFSET.get(child, mx.BONE_OFFSET[bone]), np.float64)
+            n0 = np.linalg.norm(rest)
+            d_alvo = lm[j[idx]] - lm[j[idx - 1]]
+            nd = np.linalg.norm(d_alvo)
+            if n0 < 1e-9 or nd < 1e-9:
                 continue
-            d0 = mx.BONE_OFFSET[bone]                     # direcao de rest (frame do pai)
-            n0 = np.linalg.norm(d0)
-            if n0 < 1e-9:
-                continue
-            d_world = lm[q] - lm[p]
-            nd = np.linalg.norm(d_world)
-            if nd < 1e-9:
-                continue
-            d_local = base @ (d_world / nd)               # para o frame da mao
-            rot[bone] = mx.quat_from_to(d0 / n0, d_local)
+            t_local = mx.quat_rotate(mx.quat_conj(q_prev), d_alvo / nd)
+            q = mx.quat_from_to(rest / n0, t_local)
+            rot[bone] = q
+            q_prev = mx.quat_mul(q_prev, q)
 
     for finger, joints in FINGERS.items():
-        add(finger, joints, thumb=False)
-    add("Thumb", THUMB, thumb=True)
+        add(finger, joints)
+    add("Thumb", THUMB)
     return rot
-
-
 def finger_rest_bones(side: str) -> list[str]:
     nomes = [f"{side}Hand{f}{i}" for f in list(FINGERS) + ["Thumb"] for i in (1, 2, 3)]
     return [n for n in nomes if n in mx.BONE_INDEX]
+
+
+def hands_debug_payload(hfs, width: int, height: int, fps: float = 30.0) -> dict:
+    """Payload do overlay de debug: landmarks em PIXELS do video.
+
+    Uma linha por frame: {"left": [[x, y] x21] | null, "right": ...}.
+    """
+    rows = []
+    for hf in hfs:
+        row = {}
+        for side in ("left", "right"):
+            img = getattr(hf, side + "_img", None)
+            if img is None:
+                row[side] = None
+                continue
+            row[side] = [[round(float(p[0]) * width, 2), round(float(p[1]) * height, 2)]
+                         for p in np.asarray(img, np.float64)]
+        rows.append(row)
+    return {"fps": float(fps), "width": int(width), "height": int(height),
+            "frames": rows}
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +145,8 @@ def finger_rest_bones(side: str) -> list[str]:
 class HandFrame:
     left: np.ndarray | None = None      # (21,3) world landmarks
     right: np.ndarray | None = None
+    left_img: np.ndarray | None = None  # (21,3) landmarks normalizados da imagem
+    right_img: np.ndarray | None = None
 
 
 class HandTracker:
@@ -184,6 +226,7 @@ class HandTracker:
             res = self._landmarker.detect_for_video(img, self._ts_ms)
             hf = HandFrame()
             wl = getattr(res, "hand_world_landmarks", None)
+            hl = getattr(res, "hand_landmarks", None)
             handed = getattr(res, "handedness", None) or []
             if wl is not None and len(wl) > 0:
                 for i, pts in enumerate(wl):
@@ -191,10 +234,15 @@ class HandTracker:
                     if i < len(handed) and handed[i]:
                         label = handed[i][0].category_name or "Right"
                     arr = np.array([[p.x, p.y, p.z] for p in pts], np.float64)
+                    img = None
+                    if hl is not None and i < len(hl):
+                        img = np.array([[p.x, p.y, p.z] for p in hl[i]], np.float64)
                     if label.lower().startswith("l"):
                         hf.left = arr
+                        hf.left_img = img
                     else:
                         hf.right = arr
+                        hf.right_img = img
             out.append(hf)
         return out
 
@@ -212,7 +260,8 @@ def apply_hands(anim, hands: list[HandFrame], *, mirror: bool = True):
                 continue
             lado = side if mirror else ("Right" if side == "Left" else "Left")
             try:
-                rots = finger_rotations_from_landmarks(lm, lado)
+                rh = _hand_world_rot(rotations, t, lado)
+                rots = finger_rotations_from_landmarks(lm, lado, hand_world_rot=rh)
             except Exception:  # noqa: BLE001
                 continue
             for bone, q in rots.items():

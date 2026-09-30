@@ -1,10 +1,14 @@
-# Plugins de backend (extensao sem tocar no nucleo)
+# Backend plugins (extend without touching the core)
 
-Solte um arquivo aqui e ele aparece automaticamente no dropdown.
+## Português
 
-## Formato A — modulo Python (recomendado)
+Este documento também está disponível em português: [README.pt-BR.md](README.pt-BR.md).
 
-`plugins/meu_backend.py`:
+Drop a file here and it shows up in the dropdown automatically.
+
+## Format A — Python module (recommended)
+
+`plugins/my_backend.py`:
 
 ```python
 from core.adapter import AdapterConfig, ConfigurableAdapter
@@ -13,10 +17,10 @@ from core.canonical import COCO17
 class MeuBackend(ConfigurableAdapter):
     def __init__(self):
         cfg = AdapterConfig(
-            name="meu_backend",                 # id unico (aparece no dropdown)
-            display_name="Meu Backend",
-            native_layout=list(COCO17),         # ordem dos keypoints nativos
-            mapping={n: i for i, n in enumerate(COCO17)},  # nativo -> COCO-17
+            name="meu_backend",                 # unique id (shown in the dropdown)
+            display_name="My Backend",
+            native_layout=list(COCO17),         # order of the native keypoints
+            mapping={n: i for i, n in enumerate(COCO17)},  # native -> COCO-17
             coord="pixel",                      # "pixel" | "normalized"
         )
         super().__init__(cfg)
@@ -25,30 +29,30 @@ class MeuBackend(ConfigurableAdapter):
         return True
 
     def infer_raw(self, frames, ctx):
-        # devolve, por frame: {"kp": (N,2), "score": (N,) | None} ou None
+        # returns, per frame: {"kp": (N,2), "score": (N,) | None} or None
         ...
 
 BACKEND = MeuBackend()
 ```
 
-Reinicie o servidor (ou recarregue a pagina) e o backend aparece no dropdown.
+Restart the server (or reload the page) and the backend appears in the dropdown.
 
-## Formato B — YAML com entrypoint
+## Format B — YAML with entrypoint
 
-`plugins/meu_backend.yaml`:
+`plugins/my_backend.yaml`:
 
 ```yaml
 name: meu_backend
-entrypoint: meu_pacote.modulo        # modulo importavel que exponha BACKEND
+entrypoint: my_package.module        # importable module exposing BACKEND
 metadata:
   license: MIT
 ```
 
-## Regras
+## Rules
 
-- `__init__.py` e arquivos começando com `_` sao ignorados.
-- O `mapping` e o ponto central: e nele que voce descreve as peculiaridades do
-  seu detector (ordem de juntas, coordenadas normalizadas/pixel, y invertido,
-  score). Nada de editar o nucleo.
-- Se `is_available()` retornar `False`, o backend aparece no dropdown marcado
-  como indisponivel, com o motivo em `availability_reason()`.
+- `__init__.py` and files starting with `_` are ignored.
+- The `mapping` is the core piece: it is where you describe your detector's
+  peculiarities (joint order, normalized/pixel coordinates, inverted y,
+  score). No core edits.
+- If `is_available()` returns `False`, the backend appears in the dropdown
+  marked as unavailable, with the reason in `availability_reason()`.

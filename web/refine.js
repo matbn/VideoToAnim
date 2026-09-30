@@ -3,13 +3,15 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { t, applyStatic, langSwitcher, getLang } from './i18n.js';
+import { t, applyStatic, langSwitcher, getLang } from './i18n.js?v=5';
 
 const $ = (id) => document.getElementById(id);
 const CAMERAS = { persp: [2.2, 1.6, 2.6], front: [0, 1.1, 3.2], side: [3.4, 1.1, 0] };
 
 let jobId = null, clip = null, currentFrame = 0, playing = false, spanS = 0;
+let syncSeq = 0;   // guarda contra respostas de sync fora de ordem
 const viewers = [];
+let no3d = false;
 
 function log(msg) {
   const el = $('log');
@@ -53,6 +55,7 @@ class Viewer {
         if (token !== this._loadToken) { resolve(this); return; }   // trocou de clipe
         this.model = gltf.scene;
         this.scene.add(this.model);
+        this._criarLabels();
         if (this.skeletonOnly) {
           this.model.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) o.visible = false; });
           const helper = new THREE.SkeletonHelper(this.model);
@@ -81,6 +84,29 @@ class Viewer {
       });
     });
   }
+  _criarLabels() {
+    this.labelSprites = [];
+    this._bonesByName = {};
+    const filtro = /(Index|Middle|Ring|Pinky|Thumb)\d$/;
+    const tirarPrefixo = (n) => n.replace(/^(?:mixamorig|mixamo)[:_]?/i, '');
+    this.model.traverse((o) => {
+      if (!o.isBone) return;
+      this._bonesByName[tirarPrefixo(o.name)] = o;
+      if (!filtro.test(o.name)) {
+        const spr = makeTextSprite(tirarPrefixo(o.name));
+        spr.position.set(0, 0.025, 0);
+        spr.visible = !!this._labelsOn;
+        o.add(spr);
+        this.labelSprites.push(spr);
+      }
+    });
+  }
+  getBone(nome) { return this._bonesByName ? this._bonesByName[nome] : undefined; }
+
+  setLabels(v) {
+    this._labelsOn = !!v;
+    (this.labelSprites || []).forEach((s) => { s.visible = this._labelsOn; });
+  }
   setFrame(t, fps) {
     // scrub de acao PAUSADA: setTime() trava no instante 0 (timeScale efetivo = 0
     // quando pausado — reproduzido com three.js 0.169). O caminho certo e
@@ -100,6 +126,10 @@ class Viewer {
       if (this.helper.dispose) this.helper.dispose();
       this.helper = null;
     }
+    (this.labelSprites || []).forEach((s) => {
+      if (s.material) { if (s.material.map) s.material.map.dispose(); s.material.dispose(); }
+    });
+    this.labelSprites = [];
     if (this.model) {
       this.scene.remove(this.model);
       this.model.traverse((o) => {
@@ -187,6 +217,7 @@ async function selectJob(id) {
     vid.load();
     $('video-empty').style.display = 'none';
   }
+  loadKp();
   const f = $('frame'), st = $('start'), en = $('end');
   f.max = clip.num_frames - 1; f.value = 0; st.max = clip.num_frames - 1; en.max = clip.num_frames - 1;
   st.value = 0; en.value = Math.min(clip.num_frames - 1, 10);
@@ -217,10 +248,13 @@ async function syncSliders() {
   }
   // a pose na cena vem ANTES do fetch: o playback nao depende da rede
   viewers.forEach((v) => v.setFrame(t, clip.fps));
+  drawKpOverlay();
   $('time').textContent = `${(t / clip.fps).toFixed(2)} / ${(clip.num_frames / clip.fps).toFixed(2)} s`;
   $('timeline').value = String(Math.round((t / Math.max(clip.num_frames - 1, 1)) * 1000));
+  const seq = ++syncSeq;
   try {
     const pose = await api(`/api/refine/animation/${jobId}/frame/${t}`);
+    if (seq !== syncSeq) return;   // resposta antiga: outro sync ja foi disparado depois
     const e = pose.bones[$('bone').value]?.euler_deg || [0, 0, 0];
     $('rx').value = Math.round(e[0]); $('ry').value = Math.round(e[1]); $('rz').value = Math.round(e[2]);
     $('rx-label').textContent = `${Math.round(e[0])}°`;
@@ -234,6 +268,25 @@ async function refreshPreview() {
   const url = `/api/refine/animation/${jobId}/glb?t=${Date.now()}`;
   await Promise.all(viewers.map((v) => v.load(url)));
   await syncSliders();                            // reaplica o frame no modelo novo
+}
+
+
+// --------------------------------------------- preview ao vivo das edicoes
+function eulerXYZDegToQuat(ex, ey, ez) {
+  // mesma ordem do servidor (euler_xyz_deg_to_quat): qx * qy * qz
+  const x = THREE.MathUtils.degToRad(ex) / 2, y = THREE.MathUtils.degToRad(ey) / 2,
+        z = THREE.MathUtils.degToRad(ez) / 2;
+  const qx = new THREE.Quaternion(Math.sin(x), 0, 0, Math.cos(x));
+  const qy = new THREE.Quaternion(0, Math.sin(y), 0, Math.cos(y));
+  const qz = new THREE.Quaternion(0, 0, Math.sin(z), Math.cos(z));
+  return qx.multiply(qy).multiply(qz).normalize();
+}
+
+function livePreview() {
+  if (!clip) return;
+  const q = eulerXYZDegToQuat(Number($('rx').value), Number($('ry').value), Number($('rz').value));
+  const nome = $('bone').value;
+  viewers.forEach((v) => { const b = v.getBone && v.getBone(nome); if (b) b.quaternion.copy(q); });
 }
 
 // ------------------------------------------------------------------ edicao
@@ -326,12 +379,22 @@ async function applyRefine() {
   try {
     const r = await api(`/api/refine/animation/${jobId}/apply`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ use_filters: true, use_constraints: true, filters: chosenFilters() }),
+      body: JSON.stringify({
+        use_filters: true, use_constraints: true,
+        use_collision: $('use-collision') ? $('use-collision').checked : true,
+        filters: chosenFilters(),
+      }),
     });
     log(t('ref.appliedLog', { stages: r.stages.join(' → '), bytes: r.glb.bytes }));
     if (r.constraints) {
       const c = r.constraints;
       log(t('ref.constraintsLog', { bones: c.bones_corrected, frames: c.frames_corrected_total }));
+    }
+    if (r.collision) {   // US-07: resumo da anticolisao visivel no editor
+      const k = r.collision;
+      log(t('ref.collisionLog', { n: k.frames_corrected_total || 0,
+        corrections: k.corrections_total || 0, max_deg: k.max_correction_deg || 0,
+        source: k.skeleton_source || 'reference' }));
     }
     const a = $('dl-refined-glb'), b = $('dl-refined-fbx');
     a.href = `/api/jobs/${jobId}/artifacts/glb_refined`; a.classList.remove('disabled');
@@ -525,10 +588,29 @@ async function saveLimits() {
   }
 }
 
+// 3D indisponivel: degrada com mensagem e mantem o resto do editor vivo (US-01)
+function showNo3D() {
+  for (const id of ['empty-skel', 'empty-mesh']) {
+    const el = $(id);
+    if (el) { el.style.display = ''; el.textContent = t('viewer.no3d'); }
+  }
+  document.querySelectorAll('[data-cam]').forEach((b) => { b.disabled = true; });
+  for (const id of ['sync-rot']) {
+    const el = $(id);
+    if (el) { el.disabled = true; el.checked = false; }
+  }
+}
+
 // ------------------------------------------------------------------ wire
 window.addEventListener('DOMContentLoaded', () => {
-  viewers.push(new Viewer('canvas-skel', 'empty-skel', true));
-  viewers.push(new Viewer('canvas-mesh', 'empty-mesh', false));
+  try {
+    viewers.push(new Viewer('canvas-skel', 'empty-skel', true));
+    viewers.push(new Viewer('canvas-mesh', 'empty-mesh', false));
+  } catch (err) {
+    console.error('falha ao iniciar o 3D (WebGL):', err);
+    viewers.length = 0;
+    no3d = true;
+  }
   const v0 = $('refvideo');
   if (v0) {
     v0.muted = true;
@@ -542,7 +624,8 @@ window.addEventListener('DOMContentLoaded', () => {
   applyStatic();
   langSwitcher('lang-switch');
   ligarSyncRot();
-  window.addEventListener('resize', () => viewers.forEach((v) => v.resize()));
+  if (no3d) showNo3D();
+  window.addEventListener('resize', () => { viewers.forEach((v) => v.resize()); drawKpOverlay(); });
 
   loadJobs();
   loadFilters();
@@ -552,7 +635,10 @@ window.addEventListener('DOMContentLoaded', () => {
   $('frame').addEventListener('input', syncSliders);
   $('bone').addEventListener('change', syncSliders);
   ['rx', 'ry', 'rz'].forEach((k) =>
-    $(k).addEventListener('input', () => { $(`${k}-label`).textContent = `${$(k).value}°`; }));
+    $(k).addEventListener('input', () => {
+      $(`${k}-label`).textContent = `${$(k).value}°`;
+      livePreview();   // gira o osso selecionado na hora (sem gravar)
+    }));
   $('apply-edit').addEventListener('click', applyEdit);
   $('undo').addEventListener('click', () => undoRedo('undo'));
   $('redo').addEventListener('click', () => undoRedo('redo'));
@@ -573,7 +659,137 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   document.querySelectorAll('[data-cam]').forEach((b) =>
     b.addEventListener('click', () => viewers.forEach((v) => v.setCamera(b.dataset.cam))));
+  $('kp-overlay').addEventListener('change', () => {
+    kpOn = $('kp-overlay').checked;
+    drawKpOverlay();
+  });
+  $('bone-labels').addEventListener('change', () => {
+    const on = $('bone-labels').checked;
+    viewers.forEach((v) => v.setLabels(on));
+  });
 });
+
+// ------------------------------------------- debug: overlay do esqueleto 2D
+const SKELETON_EDGES = [
+  [0, 1], [0, 2], [1, 3], [2, 4], [5, 7], [7, 9], [6, 8], [8, 10],
+  [5, 6], [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+];
+let kpData = null;
+let handsData = null;
+let kpOn = false;
+
+async function loadKp() {
+  kpData = null;
+  handsData = null;
+  const chk = $('kp-overlay');
+  if (chk) { chk.disabled = false; }
+  if (!jobId) return;
+  try {
+    const r = await fetch(`/api/jobs/${jobId}/artifacts/kp2d`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    kpData = await r.json();
+  } catch (e) {
+    kpData = null;
+    if (chk) { chk.disabled = kpOn ? false : true; }
+    const lab = chk && chk.closest('label');
+    if (lab) lab.title = t('ui.kpUnavailable');
+  }
+  if (jobId) {
+    try {
+      const rh = await fetch(`/api/jobs/${jobId}/artifacts/hands`);
+      handsData = rh.ok ? await rh.json() : null;
+    } catch (e) { handsData = null; }
+  }
+  drawKpOverlay();
+}
+
+function drawKpOverlay() {
+  const cv = $('kp-canvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const w = cv.clientWidth, h = cv.clientHeight;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!kpOn || !kpData || !kpData.frames) return;
+  const fr = kpData.frames[currentFrame];
+  if (!fr) return;
+  const vw = kpData.width || w, vh = kpData.height || h;
+  const s = Math.min(w / vw, h / vh);
+  const ox = (w - vw * s) / 2, oy = (h - vh * s) / 2;
+  const pt = (i) => [ox + fr[i][0] * s, oy + fr[i][1] * s];
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(95, 125, 106, .95)';
+  for (const [a, b2] of SKELETON_EDGES) {
+    if (!fr[a] || !fr[b2]) continue;
+    const [x1, y1] = pt(a), [x2, y2] = pt(b2);
+    ctx.globalAlpha = Math.min(1, 0.35 + 0.65 * Math.min(fr[a][2] || 0, fr[b2][2] || 1));
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  for (let i = 0; i < fr.length; i += 1) {
+    if (!fr[i]) continue;
+    const [x, y] = pt(i);
+    ctx.fillStyle = (fr[i][2] ?? 1) > 0.5 ? '#b06a48' : '#8a8175';
+    ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+  }
+  drawHandsOverlay(ctx, s, ox, oy, currentFrame);
+}
+
+// ------------------------------- maos detectadas (hand tracking) sobre o video
+const HAND_EDGES = [
+  [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
+  [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15],
+  [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17],
+];
+
+function drawHandsOverlay(ctx, s, ox, oy, frameIdx) {
+  if (!handsData || !handsData.frames) return;
+  const hf = handsData.frames[frameIdx];
+  if (!hf) return;
+  const desenha = (lm, cor) => {
+    if (!lm) return;
+    ctx.strokeStyle = cor;
+    ctx.fillStyle = cor;
+    ctx.lineWidth = 1.6;
+    for (const par of HAND_EDGES) {
+      const p1 = lm[par[0]], p2 = lm[par[1]];
+      if (!p1 || !p2) continue;
+      ctx.beginPath();
+      ctx.moveTo(ox + p1[0] * s, oy + p1[1] * s);
+      ctx.lineTo(ox + p2[0] * s, oy + p2[1] * s);
+      ctx.stroke();
+    }
+    for (const p of lm) {
+      ctx.beginPath(); ctx.arc(ox + p[0] * s, oy + p[1] * s, 2, 0, Math.PI * 2); ctx.fill();
+    }
+  };
+  desenha(hf.left, '#3d6fa8');    // mao esquerda
+  desenha(hf.right, '#b06a48');   // mao direita
+}
+
+function makeTextSprite(texto) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = '600 30px Inter, system-ui, sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  const w = g.measureText(texto).width + 18;
+  g.fillStyle = 'rgba(251, 250, 247, .86)';
+  g.fillRect(128 - w / 2, 9, w, 46);
+  g.fillStyle = '#2b2a27';
+  g.fillText(texto, 128, 33);
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.set(0.22, 0.055, 1);
+  spr.renderOrder = 999;
+  return spr;
+}
 
 // ---------------------------------------------------- sync rotation entre paineis
 let syncRot = true;

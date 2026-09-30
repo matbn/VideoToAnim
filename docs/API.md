@@ -1,4 +1,8 @@
-# API HTTP
+# HTTP API
+
+## Português
+
+Este documento também está disponível em português: [API.pt-BR.md](API.pt-BR.md).
 
 Base: `http://127.0.0.1:8000`
 
@@ -10,7 +14,7 @@ Base: `http://127.0.0.1:8000`
 
 ## `GET /api/backends`
 
-Lista os backends do registry (é o que popula o dropdown).
+Lists the registry backends (this is what populates the dropdown).
 
 ```json
 {
@@ -27,15 +31,15 @@ Lista os backends do registry (é o que popula o dropdown).
 }
 ```
 
-- `preferred` — o backend **preferido** como padrão (`vitpose`).
-- `default` — o padrão **efetivo**: o preferido se estiver disponível; caso contrário, o primeiro
-  backend visível e disponível. É esse valor que a interface pré-seleciona.
-- `hidden_count` / `disabled_plugins` — transparência sobre backends que existem mas não aparecem.
-- `?include_hidden=true` — inclui os ocultos (útil para inspeção/testes).
+- `preferred` — the **preferred** backend as default (`vitpose`).
+- `default` — the **effective** default: the preferred one if available; otherwise, the first
+  visible and available backend. This is the value the interface pre-selects.
+- `hidden_count` / `disabled_plugins` — transparency about backends that exist but do not show up.
+- `?include_hidden=true` — includes the hidden ones (useful for inspection/tests).
 
 ## `POST /api/mesh/inspect` (multipart)
 
-Diagnóstico de uma malha **sem processar vídeo**: `mesh` = arquivo `.fbx`/`.glb`.
+Diagnostics for a mesh **without processing a video**: `mesh` = a `.fbx`/`.glb` file.
 
 ```json
 {"ok": true, "filename": "MixamoChar.fbx", "bytes": 5669168,
@@ -47,31 +51,32 @@ Diagnóstico de uma malha **sem processar vídeo**: `mesh` = arquivo `.fbx`/`.gl
 
 ## `POST /api/jobs` (multipart)
 
-| campo | tipo | descrição |
+| field | type | description |
 |---|---|---|
-| `video` | arquivo | vídeo mp4/mov (limite 512 MB) |
-| `backend` | string | id do backend (`mediapipe`, `vitpose`, `synthetic`, ...) |
-| `params` | string JSON | parâmetros do job |
-| `mesh` | arquivo (opcional) | malha Mixamo `.fbx`/`.glb` para substituir os capsule sticks |
+| `video` | file | mp4/mov video (512 MB limit) |
+| `backend` | string | backend id (`mediapipe`, `vitpose`, `synthetic`, ...) |
+| `params` | JSON string | job parameters |
+| `mesh` | file (optional) | Mixamo mesh `.fbx`/`.glb` to replace the capsule sticks |
+| `lang` | string (optional) | log language: `pt` (default) or `en` |
 
-> A malha também pode ser conferida antes, pelo endpoint `POST /api/mesh/inspect`.
+> The mesh can also be checked beforehand through `POST /api/mesh/inspect`.
 
-Rejeita com `400` se o backend não existir **ou não estiver disponível**.
+Rejected with `400` if the backend does not exist **or is not available**.
 
-Parâmetros aceitos em `params`:
+Parameters accepted in `params`:
 
-| chave | default | descrição |
+| key | default | description |
 |---|---|---|
-| `fps` | fps do vídeo | fps da animação de saída |
-| `smoothing` | `"oneeuro"` | `"oneeuro"` ou `"none"` |
-| `lift_2d_to_3d` | `true` | aplica o lifter analítico se o backend só der 2D |
-| `max_frames` | todos | limita o número de frames processados |
-| `refine` | — | camada de refino (ver `params.refine` abaixo) |
+| `fps` | video fps | output animation fps |
+| `smoothing` | `"oneeuro"` | `"oneeuro"` or `"none"` |
+| `lift_2d_to_3d` | `true` | applies the analytic lifter if the backend is 2D-only |
+| `max_frames` | all | limits the number of processed frames |
+| `refine` | — | refinement layer (see `params.refine` below) |
 
-### `params.refine` (opcional)
+### `params.refine` (optional)
 
-Roda a camada de refinamento **antes** do export. Aceita `true` como atalho para os arquivos padrao
-do projeto, ou um caminho/dict:
+Runs the refinement layer **before** the export. Accepts `true` as a shortcut for the project's
+default files, or a path/dict:
 
 ```json
 {"refine": {"constraints": true,
@@ -81,45 +86,45 @@ do projeto, ou um caminho/dict:
                        "start": 20, "end": 45}]}}
 ```
 
-Ordem: constraints -> filtros -> edicoes. O log do job registra os estagios e os filtros aplicados
-(ex.: `Refino aplicado: constraints -> filters (filtros: kalman)`).
+Order: constraints -> filters -> edits. The job log records the stages and the applied filters
+(e.g., `Refinement applied: constraints -> filters (filters: kalman)`).
 
-Resposta `201`:
+Response `201`:
 
 ```json
 {"job_id": "a1b2c3d4e5f6", "status": "queued", "mesh": "MixamoChar.fbx"}
 ```
 
-## Instalação de backends
+## Backend installation
 
-### `GET /api/backends/{nome}/install`
+### `GET /api/backends/{name}/install`
 
-Estado da instalação daquele backend, mais o plano:
+The installation state of that backend, plus the plan:
 
 ```json
 {"backend": "vitpose", "status": "idle|running|done|error", "log": "...",
  "report": {"ok": true, "available_after": true, "results": [...]},
  "plan": {"kind": "auto", "total_mb": 98.0, "manual_reason": "",
           "steps": [{"kind": "pip", "target": "onnxruntime", "size_mb": 15}]},
- "label": "instalável automaticamente"}
+ "label": "automatically installable"}
 ```
 
-`GET /api/backends` inclui, por backend, `install: {kind, label, manual_reason, total_mb, installable}`.
+`GET /api/backends` includes, per backend, `install: {kind, label, manual_reason, total_mb, installable}`.
 
-### `POST /api/backends/{nome}/install?force=false`
+### `POST /api/backends/{name}/install?force=false`
 
-Dispara a instalação em background (roda em paralelo; acompanhe pelo `GET` acima). `400` para
-backends **manuais**, com o motivo exato:
+Starts the installation in the background (it runs in parallel; follow it with the `GET` above).
+`400` for **manual** backends, with the exact reason:
 
-> `openpose nao pode ser instalado automaticamente: exige compilar C++ (CMake + CUDA/OpenCL) ...`
+> `openpose cannot be installed automatically: requires compiling C++ (CMake + CUDA/OpenCL) ...`
 
-`kind` do plano: `auto` (pip/download), `pip-heavy` (instala, mas arrasta dependência grande) e
-`manual` (não automatizável).
+Plan `kind`: `auto` (pip/download), `pip-heavy` (installs, but drags in a big dependency) and
+`manual` (not automatable).
 
 ### `GET /api/jobs?status=&backend=&limit=`
 
-Lista o histórico (mais recentes primeiro). Filtros opcionais por `status`
-(`queued|running|done|error`) e `backend`; `limit` vai até 500.
+Lists the history (most recent first). Optional filters by `status`
+(`queued|running|done|error`) and `backend`; `limit` goes up to 500.
 
 ```json
 {"jobs": [{"id": "...", "video_name": "clip.mp4", "backend": "vitpose", "status": "done",
@@ -136,7 +141,7 @@ Lista o histórico (mais recentes primeiro). Filtros opcionais por `status`
   "id": "a1b2c3d4e5f6", "video_name": "clip.mp4", "video_bytes": 845233,
   "backend": "mediapipe", "params": {"fps": 30},
   "status": "done", "created_at": 1770000000.0, "started_at": ..., "finished_at": ...,
-  "error": "", "log": "[12:00:01] Job iniciado...\n",
+  "error": "", "log": "[12:00:01] Job started...\n",
   "artifacts": {"video": {"path": "...", "size": 3876598},
                 "glb": {"path": "...", "size": 88260},
                 "fbx": {"path": "...", "size": 51234}},
@@ -153,27 +158,27 @@ Lista o histórico (mais recentes primeiro). Filtros opcionais por `status`
 }
 ```
 
-Estados: `queued` → `running` → `done` | `error`.
-`mesh_report` é `null` quando nenhuma malha foi enviada.
+States: `queued` → `running` → `done` | `error`.
+`mesh_report` is `null` when no mesh was uploaded.
 
-### Interpretação do `mesh_report`
+### Interpreting the `mesh_report`
 
-| campo | significado |
+| field | meaning |
 |---|---|
-| `matched` | ossos do seu arquivo que casam com o contrato Mixamo (até 65) |
-| `missing` | ossos exigidos que faltam na sua malha |
-| `extra` | ossos fora do padrão (ignorados) |
-| `compatible` | o esqueleto serve para receber a animação |
-| `attachable` | a malha foi **de fato** usada no output (FBX binário ou GLB) |
+| `matched` | bones in your file that match the Mixamo contract (up to 65) |
+| `missing` | required bones missing from your mesh |
+| `extra` | bones outside the standard (ignored) |
+| `compatible` | the skeleton can receive the animation |
+| `attachable` | the mesh was **actually** used in the output (binary FBX or GLB) |
 
 ## `GET /api/jobs/{id}/artifacts/{name}`
 
 `name` = `video` | `glb` | `fbx`.
 
-- `video` → `video/mp4` (ou `video/quicktime`), servido **inline**, com suporte a **Range**
-  (`206 Partial Content`) — permite tocar e fazer scrub do vídeo de referência junto do esqueleto.
+- `video` → `video/mp4` (or `video/quicktime`), served **inline**, with **Range** support
+  (`206 Partial Content`) — lets you play and scrub the reference video next to the skeleton.
 - `glb` → `model/gltf-binary` · `fbx` → `application/octet-stream`.
 
 ## `GET /`
 
-Serve a SPA (`web/index.html`); os estáticos ficam em `/static/*`.
+Serves the SPA (`web/index.html`); the static files live at `/static/*`.

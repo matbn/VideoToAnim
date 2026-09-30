@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title data-i18n="app.title">video2mixamo · laboratório de retarget</title>
-<link rel="stylesheet" href="/static/style.css" />
+<link rel="stylesheet" href="/static/style.css?v=5" />
 <script type="importmap">
 {
   "imports": {
@@ -80,6 +80,10 @@
         <input type="checkbox" id="hands" />
         <span><span data-i18n="form.hands">hand tracking — anima os 40 ossos de dedo</span> <small data-i18n="form.handsSmall">(requer MediaPipe; baixa o modelo de ~8 MB)</small></span>
       </label>
+      <label class="field checkbox-line" data-i18n-title="form.collisionTitle" title="detecta o tamanho dos ossos da malha antes de cada execução e desvia membros que invadem outros; desligue para comparar">
+        <input type="checkbox" id="use-collision" checked />
+        <span><span data-i18n="form.collision">anticolisão — evita membros atravessando o tronco (usa o tamanho dos ossos da malha)</span></span>
+      </label>
 <p class="hint" data-i18n-html="hint.refineHtml">a estabilização e os constraints vêm da camada de refino — ajuste fino, comparação de
         filtros e edição por osso/frame no <a href="/refine">editor de refino</a>.</p>
 
@@ -136,6 +140,14 @@
           <input type="checkbox" id="sync-rot" checked />
           <span data-i18n="ui.syncRot">sync rotation</span>
         </label>
+        <label class="inline-chk" data-i18n-title="ui.kpOverlayTitle" title="desenha os keypoints detectados sobre o vídeo (debug)">
+          <input type="checkbox" id="kp-overlay" />
+          <span data-i18n="ui.kpOverlay">esqueleto detectado (debug)</span>
+        </label>
+        <label class="inline-chk" data-i18n-title="ui.boneLabelsTitle" title="mostra o nome de cada osso no painel 3D">
+          <input type="checkbox" id="bone-labels" />
+          <span data-i18n="ui.boneLabels">nomes dos bones</span>
+        </label>
         <button data-cam="persp" class="ghost" data-i18n="cam.persp">perspectiva</button>
         <button data-cam="front" class="ghost" data-i18n="cam.front">frente</button>
         <button data-cam="back" class="ghost" data-i18n="cam.back">costas</button>
@@ -146,8 +158,11 @@
     <div class="split">
       <div class="pane">
         <div class="pane-title" data-i18n="viewer.video">vídeo de referência</div>
-        <video id="refvideo" muted playsinline></video>
-        <div class="pane-empty" id="video-empty" data-i18n="empty.sendVideo">envie um vídeo</div>
+        <div class="video-box">
+          <video id="refvideo" muted playsinline></video>
+          <canvas id="kp-canvas" class="kp"></canvas>
+          <div class="pane-empty" id="video-empty" data-i18n="empty.sendVideo">envie um vídeo</div>
+        </div>
       </div>
       <div class="pane">
         <div class="pane-title" id="title-skel" data-i18n="viewer.skel">esqueleto (rig Mixamo)</div>
@@ -170,6 +185,6 @@
     <p class="hint" id="sync-note" data-i18n="hint.timeline">a timeline controla o vídeo, o esqueleto e a malha ao mesmo tempo.</p>
   </section>
 </main>
-<script type="module" src="/static/app.js"></script>
+<script type="module" src="/static/app.js?v=7"></script>
 </body>
 </html>

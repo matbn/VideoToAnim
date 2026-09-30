@@ -24,11 +24,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     log TEXT,
     artifacts TEXT,
     metrics TEXT,
-    mesh_report TEXT
+    mesh_report TEXT,
+    lang TEXT
 );
 """
 
-_MIGRATIONS = [("mesh_report", "ALTER TABLE jobs ADD COLUMN mesh_report TEXT")]
+_MIGRATIONS = [("mesh_report", "ALTER TABLE jobs ADD COLUMN mesh_report TEXT"),
+               ("lang", "ALTER TABLE jobs ADD COLUMN lang TEXT")]
 
 
 class JobStore:
@@ -48,17 +50,18 @@ class JobStore:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def create(self, video_name: str, video_bytes: int, backend: str, params: dict | None = None) -> str:
+    def create(self, video_name: str, video_bytes: int, backend: str, params: dict | None = None,
+               lang: str = "pt") -> str:
         job_id = uuid.uuid4().hex[:12]
         with self._lock, self._conn() as c:
             c.execute(
-                "INSERT INTO jobs (id, video_name, video_bytes, backend, params, status, created_at, log, artifacts, metrics)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO jobs (id, video_name, video_bytes, backend, params, status, created_at, log, artifacts, metrics, lang)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     job_id, video_name, int(video_bytes), backend,
                     json.dumps(params or {}, ensure_ascii=False),
                     "queued", time.time(), "", json.dumps({}, ensure_ascii=False),
-                    json.dumps({}, ensure_ascii=False),
+                    json.dumps({}, ensure_ascii=False), lang,
                 ),
             )
         return job_id
@@ -106,4 +109,6 @@ class JobStore:
                 d[k] = json.loads(d.get(k) or "null") if k == "mesh_report" else json.loads(d.get(k) or "{}")
             except (TypeError, json.JSONDecodeError):
                 d[k] = None if k == "mesh_report" else {}
+        if not d.get("lang"):
+            d["lang"] = "pt"
         return d

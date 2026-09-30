@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title data-i18n="ref.title">video2mixamo · refinamento</title>
-<link rel="stylesheet" href="/static/style.css" />
+<link rel="stylesheet" href="/static/style.css?v=5" />
 <script type="importmap">
 {
   "imports": {
@@ -61,6 +61,10 @@
     <h2 data-i18n="rsec.filters">3 · Estabilização</h2>
     <div id="filters" class="checklist"></div>
     <div class="downloads">
+      <label class="inline-chk" data-i18n-title="form.collisionTitle" title="detecta o tamanho dos ossos da malha antes de cada execução e desvia membros que invadem outros; desligue para comparar">
+        <input type="checkbox" id="use-collision" checked />
+        <span data-i18n="form.collisionShort">anticolisão</span>
+      </label>
       <button id="compare" class="ghost" data-i18n="btn.compare">Comparar filtros</button>
       <button id="apply-refine" class="ghost" data-i18n="btn.applyRefine">Aplicar refino</button>
     </div>
@@ -85,6 +89,14 @@
           <input type="checkbox" id="sync-rot" checked />
           <span data-i18n="ui.syncRot">sync rotation</span>
         </label>
+        <label class="inline-chk" data-i18n-title="ui.kpOverlayTitle" title="desenha os keypoints detectados sobre o vídeo (debug)">
+          <input type="checkbox" id="kp-overlay" />
+          <span data-i18n="ui.kpOverlay">esqueleto detectado (debug)</span>
+        </label>
+        <label class="inline-chk" data-i18n-title="ui.boneLabelsTitle" title="mostra o nome de cada osso no painel 3D">
+          <input type="checkbox" id="bone-labels" />
+          <span data-i18n="ui.boneLabels">nomes dos bones</span>
+        </label>
         <button data-cam="persp" class="ghost" data-i18n="cam.persp">perspectiva</button>
         <button data-cam="front" class="ghost" data-i18n="cam.front">frente</button>
         <button data-cam="side" class="ghost" data-i18n="cam.side">lado</button>
@@ -93,8 +105,11 @@
     <div class="split">
       <div class="pane">
         <div class="pane-title" data-i18n="viewer.video">vídeo de referência</div>
-        <video id="refvideo" muted playsinline preload="auto"></video>
-        <div class="pane-empty" id="video-empty" data-i18n="ref.loadClip">carregue um clipe</div>
+        <div class="video-box">
+          <video id="refvideo" muted playsinline preload="auto"></video>
+          <canvas id="kp-canvas" class="kp"></canvas>
+          <div class="pane-empty" id="video-empty" data-i18n="ref.loadClip">carregue um clipe</div>
+        </div>
       </div>
       <div class="pane">
         <div class="pane-title" data-i18n="viewer.skel">esqueleto (rig Mixamo)</div>
@@ -114,6 +129,6 @@
     <pre class="log" id="log" data-i18n="ref.logReady">pronto.</pre>
   </section>
 </main>
-<script type="module" src="/static/refine.js"></script>
+<script type="module" src="/static/refine.js?v=7"></script>
 </body>
 </html>

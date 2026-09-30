@@ -1,8 +1,12 @@
-# API do refinamento
+# Refinement API
 
-Base: `http://127.0.0.1:8000`. Complementa `docs/API.md` (pipeline de vídeo).
+## Português
 
-## Filtros e constraints
+Este documento também está disponível em português: [REFINE_API.pt-BR.md](REFINE_API.pt-BR.md).
+
+Base: `http://127.0.0.1:8000`. Complements `docs/API.md` (the video pipeline).
+
+## Filters and constraints
 
 ### `GET /api/refine/filters`
 
@@ -13,7 +17,7 @@ Base: `http://127.0.0.1:8000`. Complementa `docs/API.md` (pipeline de vídeo).
 
 ### `GET /api/refine/plan`
 
-Plano de filtragem padrão (de `config/filters_default.yaml`) como objeto JSON.
+The default filtering plan (from `config/filters_default.yaml`) as a JSON object.
 
 ### `GET /api/refine/constraints`
 
@@ -25,69 +29,69 @@ Plano de filtragem padrão (de `config/filters_default.yaml`) como objeto JSON.
 
 ### `PUT /api/refine/constraints`
 
-Corpo: `{"preset": {...}}`. Valida e **salva no YAML** do projeto.
-`400` com mensagem clara para: `min_deg > max_deg`, `stiffness` fora de [0,1], osso inexistente,
-`kind` inválido, limites conflitantes.
+Body: `{"preset": {...}}`. Validates and **saves to the project's YAML**.
+`400` with a clear message for: `min_deg > max_deg`, `stiffness` outside [0,1], nonexistent bone,
+invalid `kind`, conflicting limits.
 
 ```json
 {"saved": ".../config/constraints_humanoid.yaml", "limits": 32}
 ```
 
-## Clipe e editor de bone
+## Clip and bone editor
 
 ### `GET /api/refine/animation/{job_id}`
 
-Metadados do clipe atual (já com as edições) e o histórico.
+Metadata for the current clip (already with the edits) and the history.
 
 ```json
 {"job_id": "d59925e9a2a3", "fps": 30.0, "num_frames": 60,
  "animated_bones": ["Hips", "Spine", "..."],
  "root_translation": [[0.0, 0.93, 0.0], "..."],
  "history": {"session_id": "...", "edits": [{"bone": "Head", "frame": 30, "start": 20, "end": 45,
-              "author": "editor", "note": "virar cabeca"}], "undone": []}}
+              "author": "editor", "note": "turn head"}], "undone": []}}
 ```
 
-`409` se o job não tiver `anim.json` (rode o pipeline de novo — a animação bakeada passou a ser salva).
+`409` if the job has no `anim.json` (run the pipeline again — the baked animation is now saved along).
 
 ### `GET /api/refine/animation/{job_id}/frame/{t}`
 
-Pose do frame `t` (quaternion + Euler em graus) para todos os ossos animados. Fora do intervalo do
-clipe devolve `400`.
+Pose of frame `t` (quaternion + Euler in degrees) for every animated bone. Outside the clip range
+it returns `400`.
 
 ### `GET /api/refine/animation/{job_id}/glb`
 
-Exporta o **clipe atual** (com as edições) em GLB — é o que alimenta a prévia do editor.
+Exports the **current clip** (with the edits) as GLB — this is what feeds the editor's preview.
 
 ### `POST /api/refine/animation/{job_id}/edit`
 
 ```json
 {"bone": "Head", "frame": 30, "rotation_euler_deg": [0, 40, 0],
- "start": 20, "end": 45, "author": "editor", "note": "virar cabeca"}
+ "start": 20, "end": 45, "author": "editor", "note": "turn head"}
 ```
 
-Campos aceitos para o alvo: `rotation_euler_deg` (3) ou `rotation` (4, quaternion) ou `translation`
-(3 — **só no osso `Hips`**). `start`/`end` definem o intervalo afetado (default: só o frame).
+Accepted fields for the target: `rotation_euler_deg` (3) or `rotation` (4, quaternion) or `translation`
+(3 — **only on the `Hips` bone**). `start`/`end` define the affected range (default: just the frame).
 
-Resposta:
+Response:
 
 ```json
 {"report": {"bone": "Head", "frame": 30, "affected": [20, 45], "frames_rewritten": 26,
             "anchors": [19, 46], "author": "editor"}, "history_len": 1}
 ```
 
-`400` para: frame fora do clipe, intervalo inválido, frame editado fora do intervalo, osso
-inexistente, osso end-cap, edição sem alvo, `translation` fora do `Hips`.
+`400` for: frame outside the clip, invalid range, edited frame outside the range, nonexistent bone,
+end-cap bone, edit with no target, `translation` outside `Hips`.
 
 ### `POST /api/refine/animation/{job_id}/undo` · `/redo` · `/reset`
 
-Desfaz/refaz uma edição (reconstruindo o clipe do original + histórico) ou limpa todas.
+Undo/redo one edit (rebuilding the clip from the original + history) or clear them all.
 
-### Sessão persistida
+### Persisted session
 
-O clipe atual e o histórico ficam em `storage/refine/<job_id>/current.json` e `session.json` —
-sobrevivem a reinício do servidor. Fechar e reabrir mantém as edições aplicadas.
+The current clip and the history live in `storage/refine/<job_id>/current.json` and `session.json` —
+they survive a server restart. Closing and reopening keeps the edits applied.
 
-## Comparativo e refino final
+## Comparison and final refinement
 
 ### `POST /api/refine/compare/{job_id}`
 
@@ -95,7 +99,7 @@ sobrevivem a reinício do servidor. Fechar e reabrir mantém as edições aplica
 {"filters": ["one_euro", "savgol", "kalman"], "params": {}}
 ```
 
-Resposta: `{"rows": [{"filtro": "one_euro", "ganho_suavidade_%": 98.79, "atraso_frames": 0,
+Response: `{"rows": [{"filtro": "one_euro", "ganho_suavidade_%": 98.79, "atraso_frames": 0,
 "rmse": 0.018755, "erro_angular_medio_deg": 3.938, ...}], "markdown": "..."}`
 
 ### `POST /api/refine/animation/{job_id}/apply`
@@ -104,12 +108,12 @@ Resposta: `{"rows": [{"filtro": "one_euro", "ganho_suavidade_%": 98.79, "atraso_
 {"use_filters": true, "use_constraints": true, "filters": ["one_euro", "savgol"]}
 ```
 
-Aplica constraints → filtros sobre o clipe atual, gera `model_refined.glb` / `model_refined.fbx`
-(baixáveis por `/api/jobs/{id}/artifacts/glb_refined` e `fbx_refined`) e grava o relatório em
+Applies constraints → filters to the current clip, generates `model_refined.glb` / `model_refined.fbx`
+(downloadable via `/api/jobs/{id}/artifacts/glb_refined` and `fbx_refined`) and writes the report to
 `storage/refine/<job_id>/refine_report.json`.
 
-## Valores válidos
+## Valid values
 
-* filtros: `one_euro`, `moving_average`, `savgol`, `kalman`, `butterworth`, `double_exponential`
-* `kind` de constraint: `cone`, `x`, `y`, `z`
-* `axis` de filtro: `x`, `y`, `z`, `w`
+* filters: `one_euro`, `moving_average`, `savgol`, `kalman`, `butterworth`, `double_exponential`
+* constraint `kind`: `cone`, `x`, `y`, `z`
+* filter `axis`: `x`, `y`, `z`, `w`

@@ -31,11 +31,13 @@ def main() -> None:
         uvicorn.run(
             "server.app:app", host=args.host, port=args.port,
             reload=True, log_level=args.log_level,
+            timeout_graceful_shutdown=5,
         )
     else:
         from server.app import app
 
-        uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
+        uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level,
+                    timeout_graceful_shutdown=5)
 
 
 if __name__ == "__main__":

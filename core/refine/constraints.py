@@ -29,20 +29,29 @@ VALID_KINDS = ("cone", "x", "y", "z")
 # Quaternion <-> Euler (XYZ, graus)  e  slerp
 # ---------------------------------------------------------------------------
 def quat_to_euler_xyz_deg(q: np.ndarray) -> np.ndarray:
+    """Extrai angulos XYZ (q = qx*qy*qz) — INVERSA EXATA de euler_xyz_deg_to_quat.
+
+    A versao anterior negava os tres angulos (rotacao x+60 extraia -60) e NAO
+    era inversa: o roundtrip errava ate ~175. O clamp de constraints usava as
+    duas funcoes em sequencia e, perto de gimbal, uma correcao de 1 grau virava
+    ~100 graus de rotacao real (twist espurio de ~180 no antebraco).
+    """
     x, y, z, w = quat_normalize(np.asarray(q, np.float64))
     m00 = 1 - 2 * (y * y + z * z)
     m01 = 2 * (x * y - w * z)
     m02 = 2 * (x * z + w * y)
+    m10 = 2 * (x * y + w * z)
+    m11 = 1 - 2 * (x * x + z * z)
     m12 = 2 * (y * z - w * x)
     m22 = 1 - 2 * (x * x + y * y)
-    sy = float(np.clip(-m02, -1.0, 1.0))
+    sy = float(np.clip(m02, -1.0, 1.0))
     ry = float(np.arcsin(sy))
     if abs(sy) < 0.999999:
-        rx = float(np.arctan2(m12, m22))
-        rz = float(np.arctan2(m01, m00))
-    else:  # gimbal lock
+        rx = float(np.arctan2(-m12, m22))
+        rz = float(np.arctan2(-m01, m00))
+    else:  # gimbal lock: rx = 0 e a rotacao vai toda para rz
         rx = 0.0
-        rz = float(np.arctan2(-m01, m00)) if sy > 0 else float(np.arctan2(m01, m00))
+        rz = float(np.arctan2(m10, m11))
     return np.degrees([rx, ry, rz])
 
 

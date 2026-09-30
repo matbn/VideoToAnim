@@ -262,6 +262,8 @@ class Retargeter:
         max_ang = np.deg2rad(self.max_deg)
         last_valid: FramePose | None = None
         face_state: dict = {"up": None, "len": 0.0}
+        prev_dir: dict[str, np.ndarray] = {}
+        prev_world: dict[str, np.ndarray] = {}
 
         for t, frame in enumerate(frames):
             if frame.kp3d is None:
@@ -297,7 +299,20 @@ class Retargeter:
                 if d0 is None:
                     continue
                 d = d / nd if nd > 1e-9 else d0
-                world_q[bone] = mx.quat_from_to(d0, d)
+                # orientacao por TRANSPORTE PARALELO: gira a orientacao ja
+                # acumulada pelo minimo que leva a direcao ANTERIOR na atual.
+                # A montagem absoluta a partir do repouso (from_to(d0, d))
+                # acumulava twist parasita quando o osso varria um arco grande
+                # (ex.: antebraco cruzando o peito girava ~180 sem o braco
+                # mexer); o transporte por frame elimina esse efeito.
+                pd = prev_dir.get(bone)
+                pw = prev_world.get(bone)
+                if pd is not None and pw is not None and float(np.dot(pd, d)) > -0.9995:
+                    world_q[bone] = mx.quat_mul(mx.quat_from_to(pd, d), pw)
+                else:
+                    world_q[bone] = mx.quat_from_to(d0, d)
+                prev_dir[bone] = d
+                prev_world[bone] = world_q[bone]
 
             # mundo -> local
             for bone in mx.ANIMATED_BONES:

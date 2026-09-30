@@ -1,10 +1,14 @@
-# Adicionar um novo backend de pose
+# Adding a new pose backend
 
-Há dois caminhos. **Nenhum deles exige editar o núcleo ou o frontend.**
+## Português
 
-## Caminho A — plugin Python (recomendado)
+Este documento também está disponível em português: [ADDING_A_BACKEND.pt-BR.md](ADDING_A_BACKEND.pt-BR.md).
 
-1. Crie `plugins/meu_backend.py`:
+There are two paths. **Neither requires editing the core or the frontend.**
+
+## Path A — Python plugin (recommended)
+
+1. Create `plugins/my_backend.py`:
 
 ```python
 from typing import Sequence
@@ -12,119 +16,119 @@ import numpy as np
 from core.adapter import AdapterConfig, ConfigurableAdapter
 from core.canonical import COCO17
 
-class MeuBackend(ConfigurableAdapter):
+class MyBackend(ConfigurableAdapter):
     def __init__(self):
         cfg = AdapterConfig(
-            name="meu_backend",              # id unico -> aparece no dropdown
-            display_name="Meu Backend",
-            native_layout=["j0", "j1", ...], # nomes das juntas na ordem NATIVA
-            mapping={                        # nome nativo -> índice COCO-17
+            name="my_backend",               # unique id -> shows up in the dropdown
+            display_name="My Backend",
+            native_layout=["j0", "j1", ...], # joint names in NATIVE order
+            mapping={                        # native name -> COCO-17 index
                 "j0": COCO17.index("nose"),
                 "j1": COCO17.index("left_shoulder"),
                 # ...
             },
             coord="pixel",                   # "pixel" | "normalized"
-            y_flip=False,                    # True se o backend usa y para cima
-            score_map={"j0": 2, ...},        # opcional: índice do score por junta
+            y_flip=False,                    # True if the backend uses y up
+            score_map={"j0": 2, ...},        # optional: score index per joint
             smoothing="none",                # "none" | "oneeuro"
             license="MIT",
             license_category="livre",       # livre | nao_comercial | licenca_a_parte
-            notes="o que este detector tem de peculiar",
+            notes="what this detector has that is peculiar",
         )
         super().__init__(cfg)
 
     def is_available(self) -> bool:
         try:
-            import minha_lib  # noqa
+            import my_lib  # noqa
             return True
         except Exception:
             return False
 
     def availability_reason(self) -> str:
-        return "requer 'pip install minha-lib'"
+        return "requires 'pip install my-lib'"
 
     def load(self, config: dict | None = None) -> None:
-        self._model = ...  # carregar pesos aqui
+        self._model = ...  # load weights here
         self._loaded = True
 
     def infer_raw(self, frames: Sequence[np.ndarray], ctx: dict) -> list[dict]:
         out = []
         for frame in frames:
-            kp = ...    # (N, 2) na ordem de native_layout
-            sc = ...    # (N,) scores em [0,1]  (ou None)
+            kp = ...    # (N, 2) in native_layout order
+            sc = ...    # (N,) scores in [0,1]  (or None)
             out.append({"kp": kp, "score": sc} if kp is not None else None)
         return out
 
-BACKEND = MeuBackend()   # <-- o registry procura por BACKEND ou BACKENDS
+BACKEND = MyBackend()   # <-- the registry looks for BACKEND or BACKENDS
 ```
 
-2. Reinicie o servidor (ou recarregue a página) e confirme:
+2. Restart the server (or reload the page) and confirm:
 
 ```powershell
 curl http://127.0.0.1:8000/api/backends
 ```
 
-O `meu_backend` aparece na lista e no dropdown. Se for o primeiro backend **disponível** e o
-preferido (`vitpose`) não estiver instalado, ele passa a ser o padrão efetivo.
+`my_backend` shows up in the list and in the dropdown. If it is the first **available** backend and
+the preferred one (`vitpose`) is not installed, it becomes the effective default.
 
-3. Rode os testes de contrato — eles **iteram todos os backends registrados**,
-   então o seu já entra automaticamente:
+3. Run the contract tests — they **iterate every registered backend**,
+   so yours joins automatically:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_adapter_contract.py tests/test_backend_matrix.py -q
 ```
 
-> Dica: adicione o id do seu backend à lista `REGISTRABLE` de `tests/test_backend_matrix.py` para
-> que ele também atravesse o pipeline completo no teste de matriz.
+> Tip: add your backend id to the `REGISTRABLE` list in `tests/test_backend_matrix.py` so
+> it also crosses the full pipeline in the matrix test.
 
-## Caminho B — descritor YAML com entrypoint
+## Path B — YAML descriptor with an entrypoint
 
-Se o backend já vive num pacote importável:
+If the backend already lives in an importable package:
 
 ```yaml
-# plugins/meu_backend.yaml
-name: meu_backend
-entrypoint: meu_pacote.modulo     # módulo que exponha BACKEND
+# plugins/my_backend.yaml
+name: my_backend
+entrypoint: my_package.module     # module that exposes BACKEND
 metadata:
   license: MIT
 ```
 
-## Peculiaridades que o Adapter resolve por configuração
+## Peculiarities the Adapter solves by configuration
 
-| Peculiaridade | Como tratar |
+| Peculiarity | How to handle it |
 |---|---|
-| Ordem de juntas diferente | `native_layout` + `mapping` |
-| Coordenadas normalizadas ([0,1]) | `coord="normalized"` (o Adapter multiplica por w/h) |
-| y para cima (2D/3D) | `y_flip=True` (o Adapter converte para y-down) |
-| Profundidade/aproximação da câmera | **cuidado com o sinal de Z**: nosso canônico usa **+Z = frente** (a T-pose tem os pés em +Z). Se o seu backend usa "z negativo = mais perto da câmera" (como o MediaPipe), inverta o sinal — ver `backends/mediapipe_backend.py::_world` |
-| Score em canal separado | `score_map={junta_nativa: indice_do_score}` |
-| Pontos ausentes | devolver `score` baixo; use `score_threshold` |
-| Multi-pessoa | escolha a bbox/pessoa de maior confiança e devolva só ela (`multi_person=True` documenta) |
-| Suavização embutida no modelo | deixar `smoothing="none"` para não suavizar duas vezes |
-| Saída 3D nativa | preencher `extra={"kp3d": ...}` ou sobrescrever `kp3d` em `postprocess()` |
+| Different joint order | `native_layout` + `mapping` |
+| Normalized coordinates ([0,1]) | `coord="normalized"` (the Adapter multiplies by w/h) |
+| y up (2D/3D) | `y_flip=True` (the Adapter converts to y-down) |
+| Camera depth/proximity | **watch the Z sign**: our canonical uses **+Z = front** (the T-pose has the feet at +Z). If your backend uses "negative z = closer to the camera" (like MediaPipe), flip the sign — see `backends/mediapipe_backend.py::_world` |
+| Score in a separate channel | `score_map={native_joint: score_index}` |
+| Missing points | return a low `score`; use `score_threshold` |
+| Multi-person | pick the highest-confidence bbox/person and return only that one (`multi_person=True` documents it) |
+| Smoothing baked into the model | keep `smoothing="none"` to avoid smoothing twice |
+| Native 3D output | fill `extra={"kp3d": ...}` or override `kp3d` in `postprocess()` |
 
-## Hooks do `ConfigurableAdapter`
+## `ConfigurableAdapter` hooks
 
-- `infer_raw(frames, ctx)` — **obrigatório**: a chamada ao modelo.
-- `postprocess(pose, index, ctx)` — opcional: ajustes por frame (ex.: injetar 3D).
-- `is_available()` / `availability_reason()` — opcional: disponibilidade honesta.
+- `infer_raw(frames, ctx)` — **required**: the model call.
+- `postprocess(pose, index, ctx)` — optional: per-frame adjustments (e.g., inject 3D).
+- `is_available()` / `availability_reason()` — optional: honest availability.
 
-## Convenções do esqueleto canônico (COCO-17)
+## Canonical skeleton conventions (COCO-17)
 
 `0 nose, 1 left_eye, 2 right_eye, 3 left_ear, 4 right_ear, 5 left_shoulder,
 6 right_shoulder, 7 left_elbow, 8 right_elbow, 9 left_wrist, 10 right_wrist,
 11 left_hip, 12 right_hip, 13 left_knee, 14 right_knee, 15 left_ankle,
-16 right_ankle` — em **pixel absoluto**, **y para baixo**, `score` em [0,1].
-No 3D: **metros**, **y para cima**, **+Z = frente** do personagem.
+16 right_ankle` — in **absolute pixels**, **y down**, `score` in [0,1].
+In 3D: **meters**, **y up**, **+Z = the character's front**.
 
-## Controlar se o backend aparece no dropdown
+## Controlling whether the backend shows up in the dropdown
 
-| atributo | efeito |
+| attribute | effect |
 |---|---|
-| `license_category` | `"livre"` / `"nao_comercial"` / `"licenca_a_parte"` (constantes `CAT_LIVRE`, `CAT_NAO_COMERCIAL`, `CAT_LICENCA_A_PARTE`). Aparece como rótulo colorido no dropdown, na API e no painel do job. Também alimenta `registry.by_license_category()`. |
-| `license` | texto livre com a licença exata (ex.: `"AGPL-3.0 (Ultralytics)"`). Mostrado no hint ao selecionar. |
-| `hidden_from_ui = True` | o backend continua **registrado** e executável, mas **não aparece** no dropdown. |
-| `PLUGIN_DISABLED = True` (módulo) | o plugin **não é carregado**: existe no disco como exemplo, fora do registry, sem gerar erro. Estado do `plugins/example_backend.py`. |
+| `license_category` | `"livre"` / `"nao_comercial"` / `"licenca_a_parte"` (constants `CAT_LIVRE`, `CAT_NAO_COMERCIAL`, `CAT_LICENCA_A_PARTE`). Shows as a colored label in the dropdown, in the API and in the job panel. Also feeds `registry.by_license_category()`. |
+| `license` | free text with the exact license (e.g., `"AGPL-3.0 (Ultralytics)"`). Shown in the hint when selecting. |
+| `hidden_from_ui = True` | the backend stays **registered** and runnable, but does **not appear** in the dropdown. |
+| `PLUGIN_DISABLED = True` (module) | the plugin is **not loaded**: it stays on disk as an example, out of the registry, without raising an error. State of `plugins/example_backend.py`. |
 
-No primeiro caso, `GET /api/backends?include_hidden=true` ainda o lista; no segundo, ele só volta a
-existir quando `PLUGIN_DISABLED` for removido/False.
+In the first case, `GET /api/backends?include_hidden=true` still lists it; in the second, it only
+comes back to existence when `PLUGIN_DISABLED` is removed/False.

@@ -47,9 +47,10 @@ def load_animation(path: str | Path) -> Animation:
 
 
 def export_animation_glb(anim: Animation, path: str | Path,
-                         skin_mesh: dict | None = None) -> dict:
+                         skin_mesh: dict | None = None,
+                         rig: dict | None = None) -> dict:
     from core.export_glb import build_glb
-    return build_glb(anim, path, skin_mesh=skin_mesh)
+    return build_glb(anim, path, skin_mesh=skin_mesh, rig=rig)
 
 
 def export_animation_fbx(anim: Animation, path: str | Path) -> dict:
