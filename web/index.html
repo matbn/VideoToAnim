@@ -47,12 +47,20 @@
 
       <label class="field">
         <span data-i18n="form.video">Vídeo (mp4/mov)</span>
-        <input type="file" id="video" accept="video/mp4,video/quicktime,video/*" />
+        <span class="file-pick">
+          <input type="file" id="video" accept="video/mp4,video/quicktime,video/*" />
+          <span class="file-btn" data-i18n="file.choose">Escolher arquivo</span>
+          <span class="file-name" id="video-name" data-i18n="file.none">nenhum arquivo escolhido</span>
+        </span>
       </label>
 
       <label class="field">
         <span data-i18n="form.mesh">Malha Mixamo (opcional, .fbx/.glb)</span>
-        <input type="file" id="mesh" accept=".glb,.gltf,.fbx" />
+        <span class="file-pick">
+          <input type="file" id="mesh" accept=".glb,.gltf,.fbx" />
+          <span class="file-btn" data-i18n="file.choose">Escolher arquivo</span>
+          <span class="file-name" id="mesh-name" data-i18n="file.none">nenhum arquivo escolhido</span>
+        </span>
       </label>
       <p class="hint" id="mesh-hint" data-i18n="hint.meshNone">sem malha: o preview usa "capsule sticks".</p>
       <button id="check-mesh" class="ghost small" style="margin:-6px 0 14px" data-i18n="btn.checkMesh">Verificar malha</button>

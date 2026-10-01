@@ -165,12 +165,24 @@ class Viewer {
   // `force` ignora o guarda de mudanca (usado no loop e no seek).
   // Re-pinar o mixer 60x por segundo e desperdicado e reintroduz jitter: so
   // reescreve quando o instante realmente mudou.
+  //
+  // Usamos `action.time` + `mixer.update(0)` e NAO `mixer.setTime()`: o
+  // `setTime` reseta o tempo interno da acao para 0 e re-evalua tudo a
+  // partir do estado parado. Num job recem-processado isso deixava a pose
+  // presa no primeiro frame — o video tocava e o 3D so andava quando o
+  // ciclo dava a volta e `setTime(0, true)` reescrevia o instante. Escrever
+  // `action.time` e pedir `update(0)` aplica o valor interpolado na hora.
   setTime(t, force) {
     if (!this.mixer || !(this.clipDuration > 0)) return;
     const at = Math.max(0, Math.min(t, this.clipDuration));
     if (!force && this._lastT !== undefined && Math.abs(at - this._lastT) < 1e-4) return;
     this._lastT = at;
-    this.mixer.setTime(at);
+    if (this.action) {
+      this.action.time = Math.min(at, Math.max(0, this.clipDuration - 1e-4));
+      this.mixer.update(0);
+    } else {
+      this.mixer.setTime(at);
+    }
   }
 
   update(dt) {
@@ -753,6 +765,18 @@ function updateMeshHint() {
     : t('hint.meshNone');
 }
 
+// O `<input type=file>` tem o botao e o texto "nenhum arquivo escolhido"
+// DESENHADOS PELO NAVEGADOR, no idioma do navegador. Como o input fica
+// transparente (ver `.file-pick` no CSS), escrevemos o nome escolhido no
+// rotulo ao lado — e ele volta ao texto neutro quando o campo esvazia
+// (o botao "limpar" do navegador dispara `change` com `files` vazio).
+function updateFileName(inputId, labelId) {
+  const f = $(inputId) && $(inputId).files[0];
+  const el = $(labelId);
+  if (!el) return;
+  el.textContent = f ? f.name : t('file.none');
+}
+
 async function checkMesh() {
   const f = $('mesh').files[0];
   if (!f) { alert(t('alert.selectMesh')); return; }
@@ -1062,6 +1086,9 @@ window.addEventListener('DOMContentLoaded', () => {
   $('backend').addEventListener('change', updateHint);
   $('install-btn').addEventListener('click', installSelected);
   $('mesh').addEventListener('change', updateMeshHint);
+  // o nome do arquivo escolhido, no rotulo ao lado do input invisivel
+  $('video').addEventListener('change', () => updateFileName('video', 'video-name'));
+  $('mesh').addEventListener('change', () => updateFileName('mesh', 'mesh-name'));
   $('check-mesh').addEventListener('click', checkMesh);
   $('submit').addEventListener('click', submitJob);
   $('playpause').addEventListener('click', togglePlay);

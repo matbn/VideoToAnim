@@ -35,6 +35,10 @@ const DICT = {
     'sec.compare': '4 · Comparação: referência × esqueleto × malha',
     'sec.history': 'Histórico de jobs',
     'form.backend': 'Backend de pose',
+    // o botao/rotulo do seletor de arquivo sao desenhados por nos (o do
+    // navegador segue o idioma do navegador, nao o da pagina)
+    'file.choose': 'Escolher arquivo',
+    'file.none': 'nenhum arquivo escolhido',
     'btn.install': 'Instalar automaticamente',
     'btn.installX': 'Instalar {name} automaticamente',
     'btn.installing': 'Instalando…',
@@ -306,6 +310,10 @@ const DICT = {
     'sec.compare': '4 · Comparison: reference × skeleton × mesh',
     'sec.history': 'Job history',
     'form.backend': 'Pose backend',
+    // the file picker button/label are drawn by us (the browser's own ones
+    // follow the browser language, not the page language)
+    'file.choose': 'Choose file',
+    'file.none': 'no file chosen',
     'btn.install': 'Install automatically',
     'btn.installX': 'Install {name} automatically',
     'btn.installing': 'Installing…',

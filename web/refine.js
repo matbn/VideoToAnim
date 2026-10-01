@@ -541,7 +541,19 @@ async function syncSliders() {
   const pose = await api(`/api/refine/animation/${jobId}/frame/${t}?space=${sp}`);
     if (seq !== syncSeq) return;   // resposta antiga: outro sync ja foi disparado depois
     const e = pose.bones[$('bone').value]?.euler_deg || [0, 0, 0];
-    $('rx').value = Math.round(e[0]); $('ry').value = Math.round(e[1]); $('rz').value = Math.round(e[2]);
+    // O preview 3D acima mostra a pose do clipe com a PRECISAO do dado. Se o
+    // slider guardasse o valor arredondado (37 de 37,4), o "aplicar" mandaria
+    // 37 e o frame alvo ficaria meio grau fora do que o usuario viu. Guardamos
+    // o valor exato — o `step` do range continua inteiro, entao o arredondamento
+    // continua valendo quando o usuario ARRASTA o slider de proposito.
+    const exatos = [e[0], e[1], e[2]];
+    for (const [id, val] of [['rx', exatos[0]], ['ry', exatos[1]], ['rz', exatos[2]]]) {
+      const el = $(id);
+      // `step=1` faz o navegador arredondar o `.value`; guardamos o valor
+      // cheio numa property e reaplicamos em `applyEdit`.
+      el._exact = val;
+      el.value = String(Math.round(val));
+    }
     $('rx-label').textContent = `${Math.round(e[0])}°`;
     $('ry-label').textContent = `${Math.round(e[1])}°`;
     $('rz-label').textContent = `${Math.round(e[2])}°`;
@@ -605,12 +617,28 @@ function livePreview() {
 }
 
 // ------------------------------------------------------------------ edicao
+// O valor que o "aplicar" manda. O slider tem `step=1`, entao o navegador
+// arredonda `.value` para o grau mais proximo — mas a pose que o preview
+// mostrou e a do dado, com precisao. Se o usuario NAO arrastou o controle,
+// mandamos o valor cheio (`_exact`, posto por `syncSliders`); se arrastou,
+// o valor dele manda. Sem isto o frame alvo ficava ate meio grau fora do
+// que estava na tela.
+function eulerExato(id) {
+  const el = $(id);
+  const slider = Number(el.value);
+  const exato = el._exact;
+  // so usamos o valor cheio se ele ainda corresponde ao slider arredondado
+  // (isto e: o usuario nao mexeu). Depois de arrastar, os dois divergem.
+  if (typeof exato === 'number' && Math.round(exato) === slider) return exato;
+  return slider;
+}
+
 async function applyEdit() {
   if (!jobId) return;
   const body = {
     bone: $('bone').value,
     frame: Number($('frame').value),
-    rotation_euler_deg: [Number($('rx').value), Number($('ry').value), Number($('rz').value)],
+    rotation_euler_deg: [eulerExato('rx'), eulerExato('ry'), eulerExato('rz')],
     space: editSpace(),
     start: Number($('start').value),
     end: Number($('end').value),
@@ -976,6 +1004,9 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   ['rx', 'ry', 'rz'].forEach((k) =>
     $(k).addEventListener('input', () => {
+      // arrastou: o valor do slider passa a ser o do usuario e o `_exact`
+      // (do dado) deixa de valer — `eulerExato` volta a mandar o slider.
+      $(k)._exact = null;
       $(`${k}-label`).textContent = `${$(k).value}°`;
       livePreview();   // gira o osso selecionado na hora (sem gravar)
     }));

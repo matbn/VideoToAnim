@@ -71,6 +71,38 @@ input[type="file"], input[type="number"], select {
   border-radius: var(--radius-sm); padding: 9px 11px; width: 100%;
   transition: border-color .15s ease, background .15s ease;
 }
+
+/* O botao "Escolher arquivo" / "Choose File" e o "Nenhum arquivo escolhido"
+   SAO DO NAVEGADOR: eles seguem o idioma do navegador, nao o da pagina, e
+   nao ha atributo que os traduza. Escondemos o input nativo e desenhamos o
+   proprio botao, com o rotulo vindo do dicionario de i18n. O input continua
+   no DOM (mesmo id, mesmo `.files`), so invisivel — o `<label>` abaixo
+   dispara o seletor normalmente. */
+.file-pick { position: relative; }
+.file-pick input[type="file"] {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer; padding: 0; border: 0; margin: 0;
+}
+.file-pick .file-btn,
+.file-pick .file-name {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 38px; padding: 8px 12px;
+  border: 1px dashed var(--line); border-radius: var(--radius-sm);
+  background: var(--surface-2); text-align: left;
+}
+.file-pick .file-btn {
+  font-family: inherit; font-size: 13.5px; color: var(--ink);
+  cursor: pointer; border-style: solid; flex: none;
+}
+.file-pick .file-name {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono);
+}
+/* o foco do input invisivel precisa aparecer no botao desenhado */
+.file-pick:focus-within .file-btn {
+  border-color: var(--accent); background: #fff;
+}
 input:focus, select:focus { outline: none; border-color: var(--accent); background: #fff; }
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
