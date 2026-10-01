@@ -46,6 +46,7 @@ Metadados do clipe atual (já com as edições) e o histórico.
 ```json
 {"job_id": "d59925e9a2a3", "fps": 30.0, "num_frames": 60,
  "animated_bones": ["Hips", "Spine", "..."],
+ "bone_parents": {"Spine": "Hips", "LeftForeArm": "LeftArm", "...": "..."},
  "root_translation": [[0.0, 0.93, 0.0], "..."],
  "history": {"session_id": "...", "edits": [{"bone": "Head", "frame": 30, "start": 20, "end": 45,
               "author": "editor", "note": "virar cabeca"}], "undone": []}}
@@ -53,10 +54,24 @@ Metadados do clipe atual (já com as edições) e o histórico.
 
 `409` se o job não tiver `anim.json` (rode o pipeline de novo — a animação bakeada passou a ser salva).
 
+`bone_parents` é a hierarquia do rig — um cliente que desenha a própria prévia precisa dela para
+converter uma edição no espaço do mundo no quaternion local do osso.
+
 ### `GET /api/refine/animation/{job_id}/frame/{t}`
 
 Pose do frame `t` (quaternion + Euler em graus) para todos os ossos animados. Fora do intervalo do
 clipe devolve `400`.
+
+O parâmetro de query **`space`** escolhe o referencial dos ângulos de `euler_deg`:
+
+| `space` | significado | eixos |
+|---|---|---|
+| `local` (padrão) | rotação do osso **em relação ao pai** | acompanham a hierarquia |
+| `global` | **orientação absoluta** do osso na cena | presos ao mundo |
+
+Os dois coincidem no repouso e divergem assim que um ancestral gira — com o braço levantado o
+antebraço marca `Z = -0,6°` em local contra `Z = -62,7°` em global. `quat` é **sempre** o quaternion
+local (é o que o clipe guarda). `space` desconhecido devolve `400`.
 
 ### `GET /api/refine/animation/{job_id}/glb`
 
@@ -65,22 +80,28 @@ Exporta o **clipe atual** (com as edições) em GLB — é o que alimenta a pré
 ### `POST /api/refine/animation/{job_id}/edit`
 
 ```json
-{"bone": "Head", "frame": 30, "rotation_euler_deg": [0, 40, 0],
+{"bone": "Head", "frame": 30, "rotation_euler_deg": [0, 40, 0], "space": "local",
  "start": 20, "end": 45, "author": "editor", "note": "virar cabeca"}
 ```
 
 Campos aceitos para o alvo: `rotation_euler_deg` (3) ou `rotation` (4, quaternion) ou `translation`
 (3 — **só no osso `Hips`**). `start`/`end` definem o intervalo afetado (default: só o frame).
 
+`space` (`local` por padrão) é o referencial de `rotation_euler_deg`, com o mesmo significado do GET
+acima; é ignorado quando o alvo vem como quaternion cru. Em `global` os ângulos são convertidos para
+a rotação local do osso usando a **rotação de mundo do pai no frame alvo** — a única definição
+consistente num clipe 100% bakeado, em que não existe curva para reavaliar. Edições salvas antes
+desse campo existir assumem `local`. `space` desconhecido devolve `400`.
+
 Resposta:
 
 ```json
 {"report": {"bone": "Head", "frame": 30, "affected": [20, 45], "frames_rewritten": 26,
-            "anchors": [19, 46], "author": "editor"}, "history_len": 1}
+            "anchors": [19, 46], "author": "editor", "space": "local"}, "history_len": 1}
 ```
 
 `400` para: frame fora do clipe, intervalo inválido, frame editado fora do intervalo, osso
-inexistente, osso end-cap, edição sem alvo, `translation` fora do `Hips`.
+inexistente, osso end-cap, edição sem alvo, `translation` fora do `Hips`, `space` inválido.
 
 ### `POST /api/refine/animation/{job_id}/undo` · `/redo` · `/reset`
 

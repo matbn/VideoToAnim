@@ -4,6 +4,243 @@
 
 This document is also available in English: [CHANGELOG.md](CHANGELOG.md).
 
+## [1.4.14] — Mistura de partes do corpo entre dois jobs
+
+Reported: *"eu rodei dois jobs e acho que em um deles o braço tem um tracking melhor que o do outro; quero
+o corpo do B e o braço do A"*
+
+### Adicionado
+
+* **`Misturar partes entre dois jobs`**, no editor de refino: escolha o job de **origem**, marque as
+  partes do corpo (quadril, torso, cabeça, braco esquerdo/direito, perna esquerda/direita) e aplique.
+  O clipe do editor passa a ter só aquelas partes vindo do outro job; o resto continua como estava.
+  Há um **desfazer** que volta ao clipe anterior.
+
+  Verificado no navegador com dois jobs reais do mesmo vídeo (`4ac4511714b6` mediapipe →
+  `ba5bb21ae562` rtmpose): 19 ossos do braço esquerdo, **erro angular 0,000° contra a origem**, o
+  restante do corpo idêntico ao destino, e o desfazer restaurando os dois.
+
+* **O transplante acontece em espaço de mundo, e isso é o ponto.** As rotações do clipe são **locais
+  (em relação ao pai)**, então colar a rotação local do braço de A no corpo de B não daria o braço de
+  A — daria um braço torto, porque o ombro é outro. O que entra no destino é a **rotação de mundo** de
+  A, reexpressa em relação ao pai (já transplantado) de B:
+
+  ```
+  local_novo[t] = conj(mundo_pai_novo[t]) · mundo_A[t]
+  ```
+
+  Ossos **abaixo** de uma parte transplantada que não foram escolhidos mantêm a rotação local do
+  destino e giram junto — é assim que o antebraço e a mão acompanham o ombro.
+
+  Consequência útil: escolher só `torso` dá o torso de A **com os braços de B pendurados nele**, e não
+  o personagem inteiro de A.
+
+* As partes saem da **hierarquia do rig**, não de uma lista na mão: braço = subárvore de
+  `LeftShoulder` (19 ossos, incluindo os 15 dos dedos), perna = subárvore de `LeftUpLeg`,
+  cabeça = subárvore de `Neck`. `torso` é a única lista explícita (`Spine`, `Spine1`, `Spine2`) —
+  a subárvore de `Spine2` contém braços, pernas e cabeça, e uma "parte" que engole o personagem todo
+  não é uma parte.
+
+* **A trajetória do quadril** (a translação da raiz, que é o movimento do corpo no espaço) só é copiada
+  junto com a parte `quadril / raiz`, por padrão. Há uma caixa para forçar.
+
+* Jobs com **número de frames ou fps diferentes** são recusados com erro claro: misturar clipes
+  diferentes exigiria alinhar no tempo, que não é feito.
+
+* Desfazer guarda um **snapshot do clipe inteiro** (o histórico de edições é da granularity de um
+  `BoneEdit` por osso/frame; um transplante seriam milhares). `EditHistory` ganhou `snapshots`.
+
+* **Layout de duas colunas no editor**: os controles ficam numa coluna que rola sozinha e a prévia
+  fica **presa ao lado** — vídeo + esqueleto + malha no `Refino`, o par A/B na `Mistura A/B`.
+  Ajustar um osso não exige mais rolar até o fim para ver o resultado, subir para ajustar e descer de
+  novo: a prévia nunca sai da tela, e a página em si deixa de rolar. Abaixo de 1180 px as colunas
+  empilham, então janelas estreitas continuam funcionando.
+
+* **O seletor de origem foi para o painel A e o destino virou texto puro.** A aba de mistura
+  mostrava o seletor de job na coluna de ajustes enquanto o clipe A ficava na coluna da prévia, do
+  outro lado — não ficava claro qual job o seletor controlava. O seletor agora fica logo acima do
+  painel A, e o hash do destino é texto somente-leitura em vez de uma caixa de input com aparência
+  de editável.
+
+* **Arrastar a timeline durante a reprodução passou a funcionar.** O loop de reprodução reescrevia o
+  slider ~60x/s, então o arrasto voltava para debaixo do cursor e parecia que o evento `input` estava
+  quebrado. Agora o slider é do usuário durante o arraste (a reprodução pausa no `pointerdown` e volta
+  no `pointerup`), e o rótulo de tempo continua atualizando. Verificado no Chrome headless com arrasto
+  real de mouse na página do pipeline: o slider segue o ponteiro, o vídeo segue o slider e o rótulo confere.
+
+* **O editor agora tem duas abas** — `Refino` (clipe, editor de bone, filtros, constraints, prévia) e
+  `Mistura A/B` — para os controles de mistura não apertarem a tela de refino. A barra de tempo e o
+  log ficam **fora** das abas, entao a mesma timeline serve as duas: arrastar o playhead na aba da
+  mistura move os painéis A/B e o vídeo de referência juntos. Trocar de aba redimensiona os canvas
+  3D (um canvas oculto mede 0 e renderizaria em branco).
+
+* **Painéis A/B lado a lado**, dentro da aba `Mistura A/B`: os dois jobs na mesma câmera e no mesmo frame da
+  timeline, com os nomes dos jobs. Escolher a origem no seletor recarrega o par; aplicar ou desfazer a
+  mistura recarrega o painel de destino para mostrar o resultado.
+
+* **Mapeamento de intervalo**, para quando os dois jobs não são exatamente o mesmo trecho de vídeo —
+  por exemplo `frames 1 a 23 do braco esquerdo de A` aplicados nos `frames 3 a 35 de B`. A duração pode
+  mudar (a origem é reamostrada por **slerp no tempo**, não por índice), e **só o intervalo do destino é
+  reescrito**: os frames de fora continuam exatamente como estavam.
+
+  Medido no job real (`1..23` → `3..35`, 23 frames viram 33): erro angular contra a origem
+  **média 0,107°, máximo 0,416°** dentro do intervalo (a diferença é só o arredondamento da
+  reamostração), e os frames fora dele **0,0000°** contra o destino — intocados.
+
+  Sem o mapeamento, jobs com números de frames diferentes continuam sendo recusados. O `fps` precisa
+  bater de qualquer forma: com fps diferente as durações não são comparáveis.
+
+  O relatório de erro também passou a medir **só o intervalo mapeado** — medir o clipe inteiro dava
+  85° médios, que eram só os frames de fora (que por desenho continuam sendo do destino).
+
+## [1.4.13] — Prévia: vídeo e 3D compartilham enquadramento e relógio
+
+Relatado: *"o output da malha/esqueleto não está muito bem alinhado com o vídeo, o preview da animação tem um delay em relação à referência"*
+
+### Corrigido
+
+* **O 3D sempre corria 1–2 frames atrás do vídeo.** O loop de reprodução movia o esqueleto a partir de
+  `video.currentTime`, que é o *relógio de reprodução* — ele corre à frente do frame que o navegador já
+  pintou. O viewer agora lê o instante do frame apresentado em
+  `requestVideoFrameCallback` (`mediaTime`), então a pose na tela é a pose do frame que se está vendo.
+  Custo medido do caminho antigo: 33–66 ms a 30 fps, constante. Navegadores sem a API
+  (Safari < 15.4, Firefox < 132) caem para `currentTime`, como antes.
+
+* **O desalinhamento ainda crescia de 0 até cerca de um frame ao longo do clipe.** O mapeamento era
+  `videoTime / video_span_s * clipDuration`, mas o último keyframe do GLB está em `(T-1)/fps` enquanto
+  `video_span_s` é `T/fps` — a animação era comprimida em `(T-1)/T` (**0,6%** no clipe de referência de
+  167 frames, ~33 ms de atraso no último frame) e o loop passava um frame do fim do clipe. A prévia
+  agora mapeia **frame a frame** (`animTime = mediaTime * videoFps / targetFps`) e faz o loop no último
+  keyframe, então os dois ficam travados no clipe inteiro e em qualquer combinação de fps.
+
+* **A câmera era fixa e o vídeo não**, o que fazia os três painéis parecerem desalinhados mesmo com a
+  pose certa. A nova preset **`enquadrar vídeo`** reenquadra o 3D com a *mesma* geometria que o lifter
+  usou para liftar a pose (quadril em 0,98 m, tronco 0,52 m), derivada das juntas 2D do primeiro frame e
+  do tamanho do vídeo:
+  * distância = `0.52 / (2 · (tronco_px / altura_video) · tan(fov/2))`
+  * altura do olho = `0.98 − d · tan(fov/2) · (1 − 2·py_quadril / altura_video)`, mais um termo
+    horizontal para personagens fora do centro.
+
+  Aí as frações de quadro do personagem batem com as do vídeo **exatamente** (verificado até 1e-9 em
+  `tests/test_preview_sync.py`): o quadril projeta exatamente no pixel detectado. No job de
+  referência cai em 3,69 m / 0,92 m, perto dos 3,6 m / 0,95 m fixos — para um personagem centrado
+  muda pouco, e para um fora do centro ou com outra escala o deslocamento aparente desaparece.
+  Disponível na página do pipeline e no editor de refino, recalculada ao redimensionar.
+
+* **Regressão no editor de refino (o vídeo "corria" e acabava antes de qualquer movimento).** Ao
+  fazer o vídeo de referência seguir o frame, calculei o alvo como `frame · videoFps / targetFps`, que
+  é a inversa — a fórmula que vai de **vídeo para animação**. Quando os fps batem ela dá `frame`, e o
+  alvo é um índice de frame sendo usado como **segundo**: no frame 36 o vídeo era mandado para 36 s
+  num clipe de 5,57 s. Resultado: a busca batia no fim do clipe a partir do **frame 6**, o vídeo
+  acelerava até o fim e ficava lá, enquanto o esqueleto animava normal — exatamente o sintoma
+  relatado. O correto é `frame / videoFps`. Verificado no navegador (Edge headless, job
+  4ac4511714b6): quadro 0/1/6/36/90/166 → 0,000/0,033/0,200/1,200/3,000/5,533 s, erro 0,0000 s.
+  A guarda de re-busca passou a ser `0.5 / videoFps` (segundos de vídeo) por consistência.
+
+* **`Aplicar edição` falhava em quase todo frame.** A janela afetada tinha padrão `[0, 10]` e nunca
+  acompanhava o frame alvo, então o servidor rejeitava a edição inteira com *"o frame editado (36)
+  precisa estar dentro de [0, 10]"* — isso aparecia só como uma linha no log do rodapé, sem nada no
+  editor indicando que o problema era a janela. Agora a janela **recentra no frame alvo**,
+  preservando a largura escolhida, de modo que o alvo fica sempre dentro dela.
+
+* **O rampa era torto, e o movimento virava chicote.** Com a janela de um lado só, o smoothstep é
+  suave só nas pontas — o ângulo inteiro ainda precisa ser coberto, só que em menos frames. Medido
+  no `LeftArm` do job 4ac4511714b6 (alvo no frame 36, −120° em Z): janela `[0,50]` deu pico de
+  entrada de 1,84°/frame contra 5,48°/frame na saída (**2,98×**); uma janela centrada `[26,46]` dá
+  5,28 contra 4,91 (**0,93×**). A largura padrão agora é **40 frames** (~0,7 s de rampa de cada
+  lado) em vez de 10, escolhida pela medição abaixo.
+
+  | janela | pico de entrada | vs a taxa natural do osso |
+  |---|---|---|
+  | 10 frames | 9,54 °/frame | 7,1× |
+  | 20 frames | 5,28 °/frame | 4,0× |
+  | 40 frames (padrão novo) | 3,00 °/frame | 2,2× |
+
+  A taxa mediana do próprio osso no clipe é 1,34 °/frame, então uma janela mais larga traz a mistura
+  para perto de como a animação já se move. Quem quiser uma edição mais curta ainda pode estreitar a
+  janela.
+
+### Também
+
+* O esqueleto só é repinado quando o instante realmente mudou (≥ 0,1 ms), em vez de 60× por segundo,
+  o que remove jitter do mixer e trabalho desperdiçado.
+
+* **Regressão, pegada no teste manual: a prévia travava / entrava em loop enlouquecido.** O ponto
+  de wrap era decidido pelo `mediaTime` do `requestVideoFrameCallback`, e isso é uma armadilha:
+  **um seek descarta o pipeline do navegador, e um frame só é *apresentado* — disparando o callback —
+  se não houver outro seek antes.** Seek em cima de seek congela o `mediaTime` no último frame, a
+  condição de wrap continua verdadeira e ela dispara de novo no frame seguinte: um ciclo que se
+  auto-sustenta refazendo seek para sempre. Medido no Edge headless no clipe de referência (5,53 s):
+  o caminho antigo deixava o vídeo **parado em 5,566 s com a pose presa em `5.53 / 5.53 s` e zero
+  frames apresentados**; o novo apresenta **30 frames/s e dá um loop por ciclo de 5,53 s**. O wrap
+  passou a ser decidido pelo relógio do próprio vídeo (`currentTime`, que zera de verdade no seek) e
+  o `mediaTime` velho é descartado, enquanto a pose continua usando o frame apresentado. O
+  `requestVideoFrameCallback` também encadeia de forma idempotente agora — cada evento `play` criava
+  outra cadeia que nunca morria.
+
+## [1.4.12] — Editor de refino: editar o osso em eixos locais ou globais
+
+Relatado: *"no editor de refino o X, Y e Z estão atrelados ao espaço global — disponibilize uma opção de editar em relação ao espaço local."*
+
+### Adicionado
+
+* **Seletor de referencial no editor de bone** (`local` / `global`), ao lado do seletor de osso. Os
+  sliders X/Y/Z e a prévia 3D ao vivo seguem a escolha, e o valor viaja com a edição (`space` no
+  `POST /edit`, devolvido no relatório e guardado no histórico).
+  * `local` — rotação do osso **em relação ao pai**; os eixos acompanham a hierarquia, então o número
+    mostrado é a contribuição da própria junta. É o que o editor já fazia e continua sendo o padrão,
+    então **edições existentes e históricos salvos não mudam**.
+  * `global` — **orientação absoluta** do osso na cena; os eixos ficam presos ao mundo, então o mesmo
+    número significa a mesma coisa em qualquer osso e em qualquer frame.
+
+  Medido no braço levantado do job `e63f073c2149` (frame 36): o antebraço esquerdo marca
+  `Z = -0,6°` em local contra `Z = -62,7°` em global — os 62° são todos do ombro, que é exatamente a
+  confusão que o seletor elimina.
+
+* Os dois espaços são **inversos exatos um do outro**: ler um ângulo e gravá-lo de volta devolve o
+  mesmo quaternion (erro < 1e-6°, coberto por testes). Uma edição em global é convertida para a
+  rotação local do osso pela **rotação de mundo do pai no frame alvo** — a única definição
+  consistente num clipe 100% bakeado, em que não existe curva para reavaliar. Na raiz (`Hips`) os
+  dois coincidem, porque o pai é a identidade.
+* `GET /animation/{job_id}` passou a devolver também `bone_parents` (a hierarquia do rig), para um
+  cliente fazer a mesma conversão global→local na própria prévia.
+* Um `space` desconhecido é recusado com `400` claro em vez de ser ignorado em silêncio, tanto na
+  leitura do frame quanto na edição.
+
+### Verificado
+
+* pytest **160/160** (9 testes novos: os dois referenciais são mesmo diferentes, round-trip exato
+  por osso × espaço, uma edição global chega no ângulo de mundo pedido enquanto o mesmo número em
+  local não, `space` inválido dá erro, edições antigas sem o campo continuam `local`, e
+  `world_rotation` concorda com a FK).
+* API viva checada por HTTP contra um job real: os dois espaços leem de volta, uma edição global de
+  `Z = 45°` relida como `Z = 45°`, a resposta padrão é idêntica ao comportamento `local` antigo, e
+  `space=banana` devolve `400`.
+
+## [1.4.11] — Juntas honestas: dobradiças geométricas, reprojeção 2D exata, SavGol sem escala
+
+Relatado no job `e63f073c2149` (`sword_swing_B`, t=1,19 s): *"o rightarm está levemente curvado para a direita, inclusive no debug, mas no esqueleto ele está reto"* e *"o left arm ainda está dentro do torso, precisa de um cálculo de depth melhor, porque no vídeo ele está na frente do torso"*.
+
+Três bugs independentes, encontrados medindo o job salvo offline (sem chute: cada correção é um número antes/depois no clip real).
+
+### Corrigido
+
+* **O braço era	endireitado pela etapa de constraints, não pelo retarget.** O retarget reproduz a pose levantada exatamente (erro 0,00°), mas `constraints` então dobrava o cotovelo para o lado errado: em t=36 o cotovelo direito ia de **45° (vídeo) → 115°**, o esquerdo de **158° → 179° (reto)**. Causa: o preset limitava antebraço/canela por **eixo Euler da rotação *local***, e esse quaternion é `conj(q_pai) · q_mundo` — carrega também a rotação do ombro/quadril, não a flexão da junta. Medido neste clip, o Euler-Z do antebraço varia de **−175°…+172°**, então o clamp de "sem hiperextensão" disparava em **95/167 frames** aplicando slerp de até **118°** de uma rotação que era quase toda elevação de ombro.
+  Novo tipo de limite **`bend`** mede o **ângulo real da junta pela geometria** (FK), onde 0° = reto, + = dobrado, − = hiperextensão, e corrige girando a subárvore no próprio eixo de dobradiça da junta. O preset agora usa `bend` nos dois cotovelos e joelhos; uma regra `bend` em osso que não é dobradiça é recusada com erro claro. Erro do cotovelo no frame relatado: **69,3° → 8,8°**.
+* **O braço nascia dentro do torso porque o lifter não tinha solução de profundidade.** `_solve_depth` resolvia uma junta por vez; quando o segmento 2D era *maior* que o osso (~45% dos frames) não existe `sqrt(L²−d²)` real, e o código **escalava o filho na direção do pai em X/Y** — corrompendo a projeção da imagem em até **61 px** e achatando o braço — e emitia **z = 0**, exatamente coplanar com o tronco (**30% dos cotovelos com z=0**), então a anticolisão não tinha o que corrigir.
+  O lifter agora trata a imagem como verdade: **X/Y vêm literalmente** (erro de reprojeção **61 px → 0,00 px**) e só o Z é desconhecido, resolvido por frame com Gauss-Newton sobre rigidez de comprimento de osso (suave), **não-penetração do tronco** (folga medida em Z contra uma elipse do tronco), continuidade temporal e um prior antropométrico fraco. A profundidade dos membros agora é diferente de zero em todos os frames.
+* **O personagem flutuava 8 m do chão.** `savgol_coeffs` devolvia `pinv(a)[0] * window`; a linha da pseudo-inversa já soma 1, então o fator extra **escalava qualquer sinal pelo tamanho da janela** — um `root.y` constante de `0,98 m` virava **8,82 m** (`0,98 × 9`) em todo job que usa o `filters_default.yaml` entregue. Os coeficientes agora são normalizados para somar 1 (uma média ponderada tem que devolver um constante igual).
+
+### Verificado
+
+* No job relatado: reprojeção do braço sobre o vídeo **31,3 px → 25,8 px** na média (máx **121,9 px → 93,9 px**); cotovelo em t=36 direito **69,3° → 8,8°** de erro, esquerdo **21,1° → 9,2°**; penetração braco×tronco (cápsulas) média **−0,183 m → −0,167 m**, frames com sobreposição > 2 cm **3,4% → 2,4%**; `root.y` preservado em 0,98 m.
+* Desempenho: o lifter foi de **12,1 s → 1,1 s** (constantes do frame extraídas do otimizador) e a nova etapa de dobradiças de **26,9 s → 0,3 s** (FK feita uma vez por frame, restrita aos ~14 ossos de que as juntas precisam).
+* pytest: **151/151** (20 testes de regressão novos em `tests/test_regressions.py`, um por defeito: reprojeção pixel-exata, exatidão/não-toque do limite de dobradiça, não-penetração do torso, preservação de constante no SavGol, preservação do root e uma checagem fim a fim "o pipeline não pode endireitar o cotovelo").
+
+### Nota
+
+Jobs processados antes desta versão carregam os três defeitos e devem ser reprocessados. Os backends só-2D (vitpose, rtmpose) são os afetados; o mediapipe não foi afetado pelas mudanças do lifter porque o 3D dele vem do próprio backend.
+
 ## [1.4.10] — Hand tracking realmente anima + mãos no debug 2D
 
 ### Corrigido (relatado: "o detector de mão não parece estar fazendo nada, e também não mostra no debug")
