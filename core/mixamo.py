@@ -236,6 +236,25 @@ def fk_world(local_rot: dict[str, np.ndarray], root_translation: np.ndarray) -> 
     return world_pos
 
 
+def world_rotation(local_rot: dict[str, np.ndarray], bone: str) -> np.ndarray:
+    """Rotacao MUNDO de um osso, empilhando a cadeia de ancestrais.
+
+    `fk_world` tambem calcula isso, mas so devolve as posicoes. O editor de
+    bone precisa da rotacao mundial para reinterpretar euler em espaco global
+    (ver `core.refine.boneedit`). Custa so a altura do osso: a cadeia tem no
+    maximo 7 ossos.
+    """
+    chain: list[str] = [bone]
+    cur = BONE_PARENT.get(bone)
+    while cur is not None:
+        chain.append(cur)
+        cur = BONE_PARENT.get(cur)
+    w = quat_identity()
+    for name in reversed(chain):
+        w = quat_mul(w, local_rot.get(name, quat_identity()))
+    return quat_normalize(w)
+
+
 def rest_world_positions() -> dict[str, np.ndarray]:
     """Posicoes mundo de rest (T-pose, identidade), com o Hips na altura pelvica."""
     return fk_world({n: quat_identity() for n in BONE_NAMES}, BONE_OFFSET["Hips"].copy())

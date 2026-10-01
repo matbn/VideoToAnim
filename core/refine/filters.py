@@ -98,13 +98,23 @@ def moving_average(x: np.ndarray, fps: float, window: int = 5, weight: str = "li
 
 
 def savgol_coeffs(window: int, order: int = 2) -> np.ndarray:
-    """Coeficientes Savitzky-Golay para o ponto central da janela."""
+    """Coeficientes Savitzky-Golay para o ponto central da janela.
+
+    BUG CORRIGIDO: a versao anterior multiplicava por ``window``
+    (``pinv(a)[0] * window``). A linha 0 da pseudo-inversa ja e o conjunto de
+    coeficientes que interpola o valor central, e a soma deles e 1 — a
+    multiplicacao escalava a saida pelo tamanho da janela. Efeito medido no
+    job e63f073c2149: um(root) constante de 0.98 m virava 8.82 m (0.98 * 9),
+    launch o personagem 8 m no ar. Como o filtro e uma media ponderada, um
+    sinal constante tem de sair igual: e o criterio de aceite abaixo.
+    """
     window = int(window) | 1                        # impar
     half = window // 2
     order = min(int(order), window - 1)
     x = np.arange(-half, half + 1, dtype=np.float64)
     a = np.vander(x, order + 1, increasing=True)
-    return np.linalg.pinv(a)[0] * window            # linha 0 do pinv = centro
+    c = np.linalg.pinv(a)[0]                        # linha 0 do pinv = centro
+    return c / c.sum() if abs(c.sum()) > 1e-12 else c
 
 
 def savgol(x: np.ndarray, fps: float, window: int = 11, order: int = 2) -> np.ndarray:

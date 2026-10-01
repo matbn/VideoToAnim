@@ -23,8 +23,23 @@ from pathlib import Path
 
 import numpy as np
 
-from core.mixamo import ANIMATED_BONES, BONE_NAMES, quat_normalize
+from core.mixamo import (ANIMATED_BONES, BONE_NAMES, BONE_PARENT, quat_conj,
+                        quat_identity, quat_mul, quat_normalize, world_rotation)
 from core.refine.constraints import euler_xyz_deg_to_quat, quat_to_euler_xyz_deg, slerp
+
+# Espacos em que os angulos X/Y/Z do editor podem ser interpretados.
+#
+# * ``local``  — rotacao do osso **em relacao ao pai**; os eixos acompanham a
+#   hierarquia (e o que o editor usava antes desta opcao, e o padrao dos DCCs
+#   para "local"). Medido no job e63f073c2149: o antebraco esquerdo mostra
+#   Z=-0,6 graus aqui, contra -62,7 em mundo — a diferenca e toda do ombro.
+# * ``global`` — orientacao **absoluta do osso na cena**; os eixos ficam
+#   presos ao mundo, entao o mesmo numero significa a mesma coisa em qualquer
+#   osso e em qualquer frame.
+#
+# Os dois sao inversos exatos: ler e escrever no mesmo espaco devolve o
+# quaternion original (ver `tests/test_refine.py`).
+EDIT_SPACES = ("local", "global")
 
 
 def smoothstep(u: float) -> float:
@@ -38,6 +53,7 @@ class BoneEdit:
     frame: int
     rotation: list[float] | None = None      # quaternion alvo (x,y,z,w)
     rotation_euler_deg: list[float] | None = None   # alternativa em graus XYZ
+    space: str = "local"                      # espaco dos euler: local | global
     translation: list[float] | None = None   # so faz sentido no root (Hips)
     start: int | None = None                 # intervalo afetado (inclusivo)
     end: int | None = None
@@ -46,11 +62,22 @@ class BoneEdit:
     created_at: float = field(default_factory=lambda: time.time())
 
     # ---- conveniencias -------------------------------------------------
-    def target_quat(self) -> np.ndarray | None:
+    def target_quat(self, parent_world: np.ndarray | None = None) -> np.ndarray | None:
+        """Quaternion LOCAL alvo (e o que a `Animation` guarda).
+
+        `parent_world` e a rotacao mundial do pai no frame editado: so e usada
+        no espaco `global`, onde os euler descrevem a orientacao absoluta e
+        precisam ser trazidos de volta para o espaco local do osso. Sem ela (ou
+        na raiz, cujo pai e a identidade) global e local coincidem.
+        """
         if self.rotation is not None:
             return quat_normalize(np.asarray(self.rotation, np.float64))
         if self.rotation_euler_deg is not None:
-            return euler_xyz_deg_to_quat(np.asarray(self.rotation_euler_deg, np.float64))
+            q = euler_xyz_deg_to_quat(np.asarray(self.rotation_euler_deg, np.float64))
+            if self.space == "global" and parent_world is not None:
+                q = quat_mul(quat_conj(quat_normalize(
+                    np.asarray(parent_world, np.float64))), q)
+            return q
         return None
 
     def validate(self, total_frames: int | None = None) -> list[str]:
@@ -73,6 +100,9 @@ class BoneEdit:
             errs.append("rotation deve ter 4 valores (x,y,z,w)")
         if self.rotation_euler_deg is not None and len(self.rotation_euler_deg) != 3:
             errs.append("rotation_euler_deg deve ter 3 valores (x,y,z)")
+        if self.space not in EDIT_SPACES:
+            errs.append(
+                f"space invalido: {self.space!r} (use {' ou '.join(EDIT_SPACES)})")
         if self.translation is not None and len(self.translation) != 3:
             errs.append("translation deve ter 3 valores (x,y,z)")
         if self.translation is not None and self.bone.replace("mixamorig:", "") != "Hips":
@@ -90,6 +120,8 @@ class BoneEdit:
             bone=str(d["bone"]), frame=int(d["frame"]),
             rotation=list(d["rotation"]) if d.get("rotation") else None,
             rotation_euler_deg=list(d["rotation_euler_deg"]) if d.get("rotation_euler_deg") else None,
+            # edicoes salvas antes do campo `space` existirem: retrocompativeis
+            space=str(d.get("space") or "local"),
             translation=list(d["translation"]) if d.get("translation") else None,
             start=int(d["start"]) if d.get("start") is not None else None,
             end=int(d["end"]) if d.get("end") is not None else None,
@@ -101,6 +133,19 @@ class BoneEdit:
 # ---------------------------------------------------------------------------
 # Rebake
 # ---------------------------------------------------------------------------
+def _parent_world_at(rotations: dict[str, np.ndarray], bone: str, frame: int):
+    """Rotacao mundial do PAI de `bone` no frame `frame` (identidade na raiz).
+
+    E o que converte euler global -> quaternion local. Usa a pose do frame
+    ALVO, antes de qualquer rebake: e a unica definicao consistente para um
+    clipe 100% bakeado, em que nao existe curva para reavaliar a cada frame.
+    """
+    parent = BONE_PARENT.get(bone)
+    if parent is None or parent not in rotations:
+        return quat_identity()
+    return world_rotation({k: v[frame] for k, v in rotations.items()}, parent)
+
+
 def apply_edit(anim, edit: BoneEdit) -> tuple[object, dict]:
     """Rebakeia o intervalo afetado. Devolve (nova Animation, relatorio)."""
     from core.retarget import Animation
@@ -126,7 +171,7 @@ def apply_edit(anim, edit: BoneEdit) -> tuple[object, dict]:
     a_before = max(0, start - 1)
     a_after = min(T - 1, end + 1)
 
-    q_edit = edit.target_quat()
+    q_edit = edit.target_quat(_parent_world_at(rotations, bone, frame))
     changed = 0
 
     if q_edit is not None:
@@ -174,6 +219,7 @@ def apply_edit(anim, edit: BoneEdit) -> tuple[object, dict]:
         "frames_rewritten": changed + t_changed,
         "anchors": [a_before, a_after],
         "author": edit.author,
+        "space": edit.space,
     }
     return out, report
 
@@ -195,6 +241,9 @@ def rebake_from_edits(anim, edits: list[BoneEdit]) -> tuple[object, list[dict]]:
 class EditHistory:
     edits: list[BoneEdit] = field(default_factory=list)
     undone: list[BoneEdit] = field(default_factory=list)
+    # Transplantes nao sao BoneEdits (seriam milhares, um por osso/frame): sao
+    # steps de clipe inteiro. Guardamos o clipe ANTERIOR para poder desfazer.
+    snapshots: list[dict] = field(default_factory=list)
     source: str = ""
     session_id: str = ""
     updated_at: float = field(default_factory=lambda: time.time())
@@ -231,6 +280,7 @@ class EditHistory:
             "updated_at": self.updated_at,
             "edits": [e.to_dict() for e in self.edits],
             "undone": [e.to_dict() for e in self.undone],
+            "snapshots": list(self.snapshots),
         }
 
     def save(self, path: str | Path) -> Path:
@@ -245,6 +295,7 @@ class EditHistory:
         h = EditHistory(
             edits=[BoneEdit.from_dict(x) for x in d.get("edits", [])],
             undone=[BoneEdit.from_dict(x) for x in d.get("undone", [])],
+            snapshots=list(d.get("snapshots", [])),
             source=str(d.get("source", "")),
             session_id=str(d.get("session_id", "")),
             updated_at=float(d.get("updated_at", time.time())),
