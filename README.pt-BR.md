@@ -1,19 +1,6 @@
 # VideoToAnim
 
-## English
-
-This document is also available in English: [README.md](README.md).
-
-Ferramenta **local** que recebe um vídeo, extrai a pose por um **backend selecionável em
-dropdown**, faz **retarget para o esqueleto do Mixamo** e exporta a animação 3D em
-**GLB** ou **FBX**.
-
-- Interface web (FastAPI + three.js) com dropdown de backend, upload, log do job,
-  preview 3D (play/pause, timeline, câmeras) e download.
-- Backends são **plugins**: solte um em `plugins/` e ele aparece sozinho no dropdown,
-  sem editar o núcleo ou o frontend.
-- Vem com backends **livres para uso comercial**: ViTPose (padrão), MediaPipe, RTMPose
-  e MotionBERT.
+![Demo](./docs/VideoToAnimGif.gif)
 
 ## Requisitos
 

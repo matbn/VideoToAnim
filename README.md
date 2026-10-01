@@ -1,5 +1,7 @@
 # VideoToAnim
 
+![Demo](./docs/VideoToAnimGif.gif)
+
 ## Português
 
 Este documento também está disponível em português: [README.pt-BR.md](README.pt-BR.md).
