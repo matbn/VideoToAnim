@@ -7,11 +7,50 @@ import { t, applyStatic, langSwitcher, getLang } from './i18n.js?v=5';
 
 const $ = (id) => document.getElementById(id);
 const CAMERAS = { persp: [2.2, 1.6, 2.6], front: [0, 1.1, 3.2], side: [3.4, 1.1, 0] };
+const PELVIS_Y = 0.98;   // altura pelvica de referencia (core/lifter.py)
+const SPINE_M = 0.52;    // comprimento da coluna usado pelo lifter
+
+// Enquadramento do 3D igual ao do video de referencia. Mesma geometria que o
+// lifter usou para liftar a pose, entao as fracoes de quadro batem exatamente.
+// Com a camera em (camX, camY, d) olhando para -Z, um ponto de mundo Y cai na
+// fracao de altura  f = 1/2 - (Y - camY) / (2 d tan(fov/2)):
+//   d    = SPINE_M / (2 * (tronco_px / altura_video) * tan(fov/2))
+//   camY = PELVIS_Y - d tan(fov/2) * (1 - 2 py_quadril / altura_video)
+// As fracoes batem exatamente (provado em tests/test_preview_sync.py).
+function videoCalibration() {
+  if (!kpData || !kpData.frames || !kpData.frames[0] || !kpData.width || !kpData.height) return null;
+  const f = kpData.frames[0];
+  if (!f[5] || !f[6] || !f[11] || !f[12]) return null;      // ombros/quadris
+  const mid = (a, b) => [(f[a][0] + f[b][0]) / 2, (f[a][1] + f[b][1]) / 2];
+  const hip = mid(11, 12);
+  const sho = mid(5, 6);
+  const torsoPx = Math.hypot(sho[0] - hip[0], sho[1] - hip[1]);
+  if (!(torsoPx > 1)) return null;
+  return { hipPx: hip[0], hipPy: hip[1], torsoPx, videoW: kpData.width, videoH: kpData.height };
+}
+
+function cameraForVideo(camera) {
+  const cal = videoCalibration();
+  if (!cal) return null;
+  const half = Math.tan((camera.fov * Math.PI / 180) / 2);
+  const fv = cal.torsoPx / cal.videoH;                    // tronco como fracao da altura
+  const d = SPINE_M / (2 * Math.max(fv, 1e-3) * half);
+  const camY = PELVIS_Y - d * half * (1 - 2 * cal.hipPy / cal.videoH);
+  // eixo X: o personagem pode estar fora do centro do quadro
+  const s = SPINE_M / Math.max(cal.torsoPx, 1e-3);         // m por px do video
+  const xWorld = (cal.hipPx - cal.videoW / 2) * s;         // onde o lifter botou o quadril
+  const camX = xWorld - (2 * (cal.hipPx / cal.videoW) - 1) * d * half * camera.aspect;
+  return { x: camX, y: camY, z: d };
+}
 
 let jobId = null, clip = null, currentFrame = 0, playing = false, spanS = 0;
 let syncSeq = 0;   // guarda contra respostas de sync fora de ordem
 const viewers = [];
 let no3d = false;
+let activeCam = 'persp';
+// A preset "video" so pode ser calculada depois que o kp2d chega; reaplica a
+// camera ativa quando ele carrega (ou quando o painel muda de tamanho).
+function reapplyCamera() { if (activeCam === 'video') viewers.forEach((v) => v.setCamera('video')); }
 
 function log(msg) {
   const el = $('log');
@@ -36,10 +75,23 @@ class Viewer {
     const k = new THREE.DirectionalLight(0xffffff, 1.4); k.position.set(3, 6, 4); this.scene.add(k);
     this.scene.add(new THREE.GridHelper(6, 24, 0xcfc9bd, 0xe4e0d7));
     this.resize();
+    // O painel 3D e flex (a linha da grade decide a altura), entao a caixa
+    // pode mudar SEM evento de `resize` da janela: trocar de aba, abrir o
+    // filtro de constraints, redimensionar a coluna. O three.js so mede
+    // quando alguem chama `resize()`, e o canvas ficava esticado.
+    if (typeof ResizeObserver !== 'undefined') {
+      this._ro = new ResizeObserver(() => this.resize());
+      this._ro.observe(wrap);
+    }
     this.renderer.setAnimationLoop(() => this.tick());
   }
   resize() {
-    const w = $(this.host).clientWidth || 320, h = $(this.host).clientHeight || 300;
+    const host = $(this.host);
+    // enquanto oculto a caixa mede 0: `setSize(0, 0)` deixaria o renderer
+    // com aspect invalido, e nao ha o que corrigir ainda.
+    if (!host) return;
+    const w = host.clientWidth, h = host.clientHeight;
+    if (!w || !h) return;
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -143,7 +195,20 @@ class Viewer {
     if (empty) { empty.style.display = ''; empty.textContent = t('ref.loadClip'); }
   }
   tick() { this.controls.update(); this.renderer.render(this.scene, this.camera); }
-  setCamera(n) { this.camera.position.set(...(CAMERAS[n] || CAMERAS.persp)); this.controls.target.set(0, 0.95, 0); this.controls.update(); }
+  setCamera(n) {
+    const v = (n === 'video') ? cameraForVideo(this.camera) : null;
+    if (n === 'video' && !v) {                 // sem kp2d: cai na perspectiva
+      this.camera.position.set(...CAMERAS.persp);
+      this.controls.target.set(0, 0.95, 0);
+    } else if (v) {
+      this.camera.position.set(v.x, v.y, v.z);
+      this.controls.target.set(v.x, v.y, 0);
+    } else {
+      this.camera.position.set(...(CAMERAS[n] || CAMERAS.persp));
+      this.controls.target.set(0, 0.95, 0);
+    }
+    this.controls.update();
+  }
 }
 
 // ------------------------------------------------------------------ estado
@@ -220,7 +285,10 @@ async function selectJob(id) {
   loadKp();
   const f = $('frame'), st = $('start'), en = $('end');
   f.max = clip.num_frames - 1; f.value = 0; st.max = clip.num_frames - 1; en.max = clip.num_frames - 1;
-  st.value = 0; en.value = Math.min(clip.num_frames - 1, 10);
+  // janela centrada no frame alvo, com rampa dos dois lados (ver syncRangeToFrame)
+  rangeWidth = DEFAULT_RANGE_W;
+  const w0 = Math.min(DEFAULT_RANGE_W, clip.num_frames - 1);
+  st.value = 0; en.value = String(w0);
   const bs = $('bone');
   bs.innerHTML = '';
   for (const b of clip.animated_bones) {
@@ -230,9 +298,216 @@ async function selectJob(id) {
   }
   await refreshPreview();
   await syncSliders();
+  refreshTransplantTarget();
   try { localStorage.setItem('v2m:lastJob', id); } catch (e) { /* sem storage */ }
   history.replaceState(null, '', `/refine?job=${id}`);
   log(t('ref.clipLoadedLog', { id, n: clip.num_frames, b: clip.animated_bones.length }));
+}
+
+// A janela [start, end] tem de CONTER o frame alvo. Duas consequencias do
+// editor original nao fazer isso:
+//
+// 1. o padrao era [0, 10] e nunca acompanhava o frame — sair do frame 10
+//    fazia o servidor rejeitar a edicao inteira ("o frame editado (36) precisa
+//    estar dentro de [0, 10]"), sem nenhuma pista na interface de que o
+//    problema era a janela;
+// 2. mesmo quando dava certo, uma janela assimetrica espreme o rampa inteiro
+//    de um lado so: o smoothstep do rebake e suave nas pontas, mas se o lado
+//    curto tem de percorrer todo o angulo, o meio vira um chicote.
+//
+// Aqui a largura escolhida pelo usuario e preservada e a janela e recentrada no
+// frame, o que da o mesmo espaço de rampa antes e depois do alvo.
+// Medido no job 4ac4511714b6 (osso LeftArm, alvo no frame 36, -120 graus em Z):
+// o osso se move a 1,34 graus/frame na mediana, e o pico do rebake depende da
+// largura da janela -- 7,1x a taxa natural com 10 frames, 4,0x com 20, 2,2x com
+// 40. Abaixo de ~40 o "smoothstep" fica suave so nas pontas e o meio vira um
+// chicote. 40 frames = ~0,7 s de rampa para cada lado.
+const DEFAULT_RANGE_W = 40;
+let rangeWidth = DEFAULT_RANGE_W;
+
+function syncRangeToFrame(t) {
+  if (!clip) return;
+  const last = clip.num_frames - 1;
+  const st = Number($('start').value);
+  const en = Number($('end').value);
+  const w = en - st;
+  if (w > 0) rangeWidth = w;         // largura vale enquanto couber o frame
+  if (t >= st && t <= en) return;    // ja contem o alvo: nao mexe
+  let ns = Math.round(t - rangeWidth / 2);
+  ns = Math.max(0, Math.min(ns, last - rangeWidth));
+  $('start').value = String(ns);
+  $('end').value = String(Math.min(last, ns + rangeWidth));
+}
+
+// ------------------------------------------------------------------ abas
+// Duas abas no editor: o refino de verdade (osso, filtros, constraints) e a
+// mistura A/B. A barra de tempo e o log ficam FORA das abas, entao o playhead
+// e o video de referencia servem as duas — na aba da mistura os paineis A/B
+// acompanham o mesmo frame.
+function switchRefineTab(tab) {
+  for (const b of document.querySelectorAll('.refine-tabs .tab')) {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  }
+  const mr = $('pane-refine'), mm = $('pane-merge');
+  if (mr) mr.hidden = tab !== 'refine';
+  if (mm) mm.hidden = tab !== 'merge';
+  // o 3D precisa de resize ao voltar a ser visivel (o canvas media 0 quando oculto)
+  requestAnimationFrame(() => {
+    viewers.forEach((v) => v.resize());
+    [cmpA, cmpB].forEach((v) => { if (v) v.resize(); });
+    reapplyCamera();
+    if (cmpA) syncCompareCamera(viewers[0], cmpA);
+    drawKpOverlay();
+  });
+}
+
+// ---------------------------------------------- mistura de partes entre jobs
+let trParts = [];      // [{id,label,bones}] vindas do servidor
+let cmpA = null;       // painel da origem
+let cmpB = null;       // painel do destino
+let cmpSourceJob = ''; // job carregado em cmpA
+
+// Os dois paineis A/B dividem a camera com o preview principal, para dar para
+// comparar o mesmo membro girando a camera uma vez so.
+function syncCompareCamera(origem, destino) {
+  if (!origem || !destino) return;
+  destino.camera.position.copy(origem.camera.position);
+  destino.controls.target.copy(origem.controls.target);
+  destino.controls.update();
+}
+
+function cmpFrames() {
+  const t = Number($('frame').value) || 0;
+  const fps = (clip && clip.fps) || 30;
+  if (cmpA) cmpA.setFrame(t, fps);
+  if (cmpB) cmpB.setFrame(t, fps);
+}
+
+async function loadCompareClips(force) {
+  const src = $('tr-source') ? $('tr-source').value : '';
+  const alvo = jobId;
+  if (!cmpA || !cmpB || !src || !alvo) return;
+  if (src !== cmpSourceJob || force) {
+    cmpSourceJob = src;
+    await cmpA.load(`/api/jobs/${src}/artifacts/glb`);
+    $('tr-title-a').textContent = `${t('tr.fromA')} ${src.slice(0, 8)}`;
+  }
+  await cmpB.load(`/api/refine/animation/${alvo}/glb`);
+  $('tr-title-b').textContent = `${t('tr.toB')} ${alvo.slice(0, 8)}`;
+  cmpFrames();
+  if (clip) syncRangeBounds();
+}
+
+function syncRangeBounds() {
+  const last = (clip ? clip.num_frames - 1 : 0);
+  for (const id of ['tr-t0', 'tr-t1']) { const e = $(id); if (e) e.max = String(last); }
+  for (const id of ['tr-s0', 'tr-s1']) { const e = $(id); if (e) e.max = String(last); }
+  const f = Number($('frame').value) || 0;
+  if (!$('tr-usar-mapa').checked) {
+    $('tr-s0').value = '0'; $('tr-s1').value = String(last);
+    $('tr-t0').value = '0'; $('tr-t1').value = String(last);
+  } else {
+    $('tr-t0').value = String(f); $('tr-t1').value = String(f);
+    $('tr-s0').value = String(f); $('tr-s1').value = String(f);
+  }
+}
+
+function trFrameMap() {
+  if (!$('tr-usar-mapa') || !$('tr-usar-mapa').checked) return null;
+  const s0 = Number($('tr-s0').value), s1 = Number($('tr-s1').value);
+  const t0 = Number($('tr-t0').value), t1 = Number($('tr-t1').value);
+  if (![s0, s1, t0, t1].every(Number.isFinite)) return null;
+  return { source: [s0, s1], target: [t0, t1] };
+}
+
+async function initTransplant() {
+  const sel = $('tr-source');
+  if (!sel) return;
+  try {
+    const jobs = await api('/api/jobs?status=done&limit=60');
+    sel.innerHTML = '';
+    for (const j of jobs.jobs || []) {
+      const o = document.createElement('option');
+      o.value = j.id;
+      o.textContent = `${j.id} · ${j.backend} · ${j.video_name || ''}`;
+      sel.appendChild(o);
+    }
+  } catch (e) { /* sem lista: o painel fica inerte */ }
+  try {
+    const p = await api('/api/refine/transplant/parts');
+    trParts = p.parts || [];
+    const order = new Map((p.order || []).map((id, i) => [id, i]));
+    trParts.sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
+    const box = $('tr-parts');
+    box.innerHTML = '';
+    for (const part of trParts) {
+      const lab = document.createElement('label');
+      lab.className = 'inline-chk tr-part';
+      lab.title = `${part.bones.length} ossos: ${part.bones.join(', ')}`;
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = part.id;
+      const sp = document.createElement('span');
+      sp.textContent = `${part.label} (${part.bones.length})`;
+      lab.append(cb, sp);
+      box.appendChild(lab);
+    }
+  } catch (e) { /* sem catalogo */ }
+}
+
+function trSelectedParts() {
+  return Array.from($('tr-parts').querySelectorAll('input:checked')).map((c) => c.value);
+}
+
+async function applyTransplant() {
+  if (!jobId) return;
+  const source = $('tr-source').value;
+  const parts = trSelectedParts();
+  const out = $('tr-result');
+  if (!source) { out.textContent = t('tr.noSource'); return; }
+  if (!parts.length) { out.textContent = t('tr.noParts'); return; }
+  const body = { source_job: source, parts };
+  if ($('tr-root').checked) body.copy_root_translation = true;
+  const mapa = trFrameMap();
+  if (mapa) { body.source_range = mapa.source; body.target_range = mapa.target; }
+  out.textContent = t('tr.working');
+  try {
+    const r = await api(`/api/refine/transplant/${jobId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const rep = r.report;
+    out.textContent = t('tr.done', {
+      n: rep.grafted_bones.length,
+      src: source.slice(0, 8),
+      mean: rep.vs_source.mean_deg.toFixed(3),
+      max: rep.vs_source.max_deg.toFixed(3),
+    });
+    log(t('ref.transplantApplied', {
+      parts: rep.parts.join(', '), src: source.slice(0, 8), n: rep.grafted_bones.length,
+    }));
+    await refreshPreview();
+    await loadCompareClips(true);
+  } catch (e) { out.textContent = `${t('err.upper')}: ${e.message}`; }
+}
+
+async function undoTransplant() {
+  if (!jobId) return;
+  const out = $('tr-result');
+  try {
+    const r = await api(`/api/refine/transplant/${jobId}/undo`, { method: 'POST' });
+    out.textContent = t('tr.undone', { parts: r.undone.join(', ') });
+    log(t('ref.transplantUndone', { parts: r.undone.join(', ') }));
+    await refreshPreview();
+    await loadCompareClips(true);
+  } catch (e) { out.textContent = `${t('err.upper')}: ${e.message}`; }
+}
+
+function refreshTransplantTarget() {
+  const el = $('tr-target');
+  // texto puro (o destino nao e editavel) — por isso textContent, nao value
+  if (el) el.textContent = jobId || '—';
+  // carrega os dois paineis assim que ha um destino (e uma origem escolhida)
+  loadCompareClips(true);
 }
 
 async function syncSliders() {
@@ -240,11 +515,19 @@ async function syncSliders() {
   const t = Number($('frame').value);
   currentFrame = t;
   $('frame-label').textContent = t;
-  // video de referencia acompanha o frame (scrub e playback)
+  syncRangeToFrame(t);
+  // Video de referencia acompanha o frame (scrub e playback).
+  // O frame t da animacao corresponde ao frame t do VIDEO, e o frame t do video
+  // foi apresentado em t / vFps SEGUNDOS. A inversa de `animTimeFor` do app.js.
+  // A guarda e de MEIO frame: abaixo disso nao re-busca, acima disso o video
+  // ficaria ate meio frame atras do esqueleto.
   const vid = $('refvideo');
   if (vid && clip.fps > 0 && vid.readyState >= 2) {
-    const alvo = Math.min(t / clip.fps, Math.max(vid.duration - 0.001, 0));
-    if (Math.abs(vid.currentTime - alvo) > 0.5 / clip.fps) vid.currentTime = alvo;
+    const vFps = (kpData && kpData.fps) || clip.fps;
+    // frame t -> segundo t/vFps. (Um `t * vFps / clip.fps` aqui mandava o video
+    // para o segundo t: num clipe de 5,57 s ele chegava ao fim no frame 6.)
+    const alvo = Math.min(t / vFps, Math.max(vid.duration - 0.001, 0));
+    if (Math.abs(vid.currentTime - alvo) > 0.5 / vFps) vid.currentTime = alvo;
   }
   // a pose na cena vem ANTES do fetch: o playback nao depende da rede
   viewers.forEach((v) => v.setFrame(t, clip.fps));
@@ -253,7 +536,9 @@ async function syncSliders() {
   $('timeline').value = String(Math.round((t / Math.max(clip.num_frames - 1, 1)) * 1000));
   const seq = ++syncSeq;
   try {
-    const pose = await api(`/api/refine/animation/${jobId}/frame/${t}`);
+    const sp = editSpace();
+    cmpFrames();
+  const pose = await api(`/api/refine/animation/${jobId}/frame/${t}?space=${sp}`);
     if (seq !== syncSeq) return;   // resposta antiga: outro sync ja foi disparado depois
     const e = pose.bones[$('bone').value]?.euler_deg || [0, 0, 0];
     $('rx').value = Math.round(e[0]); $('ry').value = Math.round(e[1]); $('rz').value = Math.round(e[2]);
@@ -272,6 +557,11 @@ async function refreshPreview() {
 
 
 // --------------------------------------------- preview ao vivo das edicoes
+function editSpace() {
+  const v = $('space') ? $('space').value : 'local';
+  return (v === 'global') ? 'global' : 'local';
+}
+
 function eulerXYZDegToQuat(ex, ey, ez) {
   // mesma ordem do servidor (euler_xyz_deg_to_quat): qx * qy * qz
   const x = THREE.MathUtils.degToRad(ex) / 2, y = THREE.MathUtils.degToRad(ey) / 2,
@@ -282,11 +572,36 @@ function eulerXYZDegToQuat(ex, ey, ez) {
   return qx.multiply(qy).multiply(qz).normalize();
 }
 
+// Rotacao MUNDO do pai, percorrendo SO a hierarquia de ossos. Subir por
+// .parent pegaria o no/grupo da cena, que tem transformacao propria e
+// contaminaria a conta.
+function parentWorldQuat(viewer, nome) {
+  const map = (clip && clip.bone_parents) || {};
+  const q = new THREE.Quaternion();
+  let cur = nome;
+  while (map[cur]) {
+    const pb = viewer.getBone && viewer.getBone(map[cur]);
+    if (!pb) break;
+    q.premultiply(pb.quaternion);
+    cur = map[cur];
+  }
+  return q;
+}
+
 function livePreview() {
   if (!clip) return;
-  const q = eulerXYZDegToQuat(Number($('rx').value), Number($('ry').value), Number($('rz').value));
   const nome = $('bone').value;
-  viewers.forEach((v) => { const b = v.getBone && v.getBone(nome); if (b) b.quaternion.copy(q); });
+  const space = editSpace();
+  viewers.forEach((v) => {
+    const b = v.getBone && v.getBone(nome);
+    if (!b) return;
+    const q = eulerXYZDegToQuat(Number($('rx').value), Number($('ry').value), Number($('rz').value));
+    // o three.js guarda o quaternion LOCAL do osso: em global e preciso
+    // tirar a rotacao do pai (mesma conta que o servidor faz no apply)
+    b.quaternion.copy(space === 'global'
+      ? parentWorldQuat(v, nome).invert().multiply(q)
+      : q);
+  });
 }
 
 // ------------------------------------------------------------------ edicao
@@ -296,6 +611,7 @@ async function applyEdit() {
     bone: $('bone').value,
     frame: Number($('frame').value),
     rotation_euler_deg: [Number($('rx').value), Number($('ry').value), Number($('rz').value)],
+    space: editSpace(),
     start: Number($('start').value),
     end: Number($('end').value),
     author: 'editor',
@@ -606,6 +922,9 @@ window.addEventListener('DOMContentLoaded', () => {
   try {
     viewers.push(new Viewer('canvas-skel', 'empty-skel', true));
     viewers.push(new Viewer('canvas-mesh', 'empty-mesh', false));
+    // paineis A/B da mistura: esqueleto dos dois jobs, camera e frame compartilhados
+    cmpA = new Viewer('canvas-a', 'empty-a', true);
+    cmpB = new Viewer('canvas-b', 'empty-b', true);
   } catch (err) {
     console.error('falha ao iniciar o 3D (WebGL):', err);
     viewers.length = 0;
@@ -625,8 +944,18 @@ window.addEventListener('DOMContentLoaded', () => {
   langSwitcher('lang-switch');
   ligarSyncRot();
   if (no3d) showNo3D();
-  window.addEventListener('resize', () => { viewers.forEach((v) => v.resize()); drawKpOverlay(); });
+  window.addEventListener('resize', () => { viewers.forEach((v) => v.resize()); [cmpA, cmpB].forEach((v) => { if (v) v.resize(); }); reapplyCamera(); syncCompareCamera(viewers[0], cmpA); drawKpOverlay(); });
 
+  document.querySelectorAll('.refine-tabs .tab').forEach((b) =>
+    b.addEventListener('click', () => switchRefineTab(b.dataset.tab)));
+  if ($('tr-apply')) $('tr-apply').addEventListener('click', applyTransplant);
+  if ($('tr-undo')) $('tr-undo').addEventListener('click', undoTransplant);
+  if ($('tr-source')) $('tr-source').addEventListener('change', () => loadCompareClips(true));
+  if ($('tr-usar-mapa')) $('tr-usar-mapa').addEventListener('change', (e) => {
+    if ($('tr-mapa')) $('tr-mapa').hidden = !e.target.checked;
+    syncRangeBounds();
+  });
+  initTransplant();
   loadJobs();
   loadFilters();
   loadLimits();
@@ -634,6 +963,17 @@ window.addEventListener('DOMContentLoaded', () => {
   $('job').addEventListener('change', (e) => selectJob(e.target.value));
   $('frame').addEventListener('input', syncSliders);
   $('bone').addEventListener('change', syncSliders);
+  // a largura escolhida a mao e preservada quando a janela recentra no frame
+  ['start', 'end'].forEach((k) => $(k).addEventListener('input', () => {
+    const w = Number($('end').value) - Number($('start').value);
+    if (w > 0) rangeWidth = w;
+  }));
+  // trocar o referencial muda o significado dos angulos: recarrega o painel
+  // (e restaura a pose, senao a previa ficaria com o osso torto).
+  if ($('space')) $('space').addEventListener('change', () => {
+    viewers.forEach((v) => v.setFrame(currentFrame, clip ? clip.fps : 30));
+    syncSliders();
+  });
   ['rx', 'ry', 'rz'].forEach((k) =>
     $(k).addEventListener('input', () => {
       $(`${k}-label`).textContent = `${$(k).value}°`;
@@ -658,7 +998,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (playing) step();
   });
   document.querySelectorAll('[data-cam]').forEach((b) =>
-    b.addEventListener('click', () => viewers.forEach((v) => v.setCamera(b.dataset.cam))));
+    b.addEventListener('click', () => { activeCam = b.dataset.cam; viewers.forEach((v) => v.setCamera(activeCam)); [cmpA, cmpB].forEach((v) => { if (v) v.setCamera(activeCam); }); }));
   $('kp-overlay').addEventListener('change', () => {
     kpOn = $('kp-overlay').checked;
     drawKpOverlay();
@@ -701,6 +1041,7 @@ async function loadKp() {
     } catch (e) { handsData = null; }
   }
   drawKpOverlay();
+  reapplyCamera();
 }
 
 function drawKpOverlay() {

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title data-i18n="ref.title">video2mixamo · refinamento</title>
-<link rel="stylesheet" href="/static/style.css?v=5" />
+<link rel="stylesheet" href="/static/style.css?v=7" />
 <script type="importmap">
 {
   "imports": {
@@ -27,14 +27,26 @@
   </div>
 </header>
 
-<main class="layout">
+
+
+<main class="layout layout-editor">
+  <nav class="tabs refine-tabs" role="tablist">
+    <button class="tab active" data-tab="refine" role="tab" data-i18n="tab.refine">Refino</button>
+    <button class="tab" data-tab="merge" role="tab" data-i18n="tab.merge">Mistura A/B</button>
+  </nav>
+
+  <div class="tabpane" id="pane-refine">
+    <div class="two-col">
+      <div class="col-controls">
   <section class="panel controls">
     <h2 data-i18n="rsec.clip">1 · Clipe</h2>
     <label class="field"><span data-i18n="form.job">Job (com anim.json)</span><select id="job"></select></label>
     <p class="hint" id="job-hint" data-i18n="hint.jobSelect">selecione um clipe processado.</p>
-    <div class="row"><span data-i18n="row.frames">frames</span><b id="info-frames">—</b></div>
-    <div class="row"><span data-i18n="row.bones">ossos animados</span><b id="info-bones">—</b></div>
-    <div class="row"><span data-i18n="row.session">sessão</span><b id="info-session">—</b></div>
+    <div class="job">
+      <div class="row"><span data-i18n="row.frames">frames</span><b id="info-frames">—</b></div>
+      <div class="row"><span data-i18n="row.bones">ossos animados</span><b id="info-bones">—</b></div>
+      <div class="row"><span data-i18n="row.session">sessão</span><b id="info-session">—</b></div>
+    </div>
 
     <h2 data-i18n="rsec.bone">2 · Editor de bone</h2>
     <label class="field"><span data-i18n="form.bone">osso</span><select id="bone"></select></label>
@@ -80,7 +92,8 @@
     <button id="save-limits" class="primary" data-i18n="btn.saveLimits">Salvar limites</button>
     <p class="hint" id="limits-msg"></p>
   </section>
-
+      </div>
+      <div class="col-preview">
   <section class="panel viewer">
     <div class="viewer-head">
       <h2 data-i18n="rsec.preview">5 · Prévia do clipe editado</h2>
@@ -97,6 +110,7 @@
           <input type="checkbox" id="bone-labels" />
           <span data-i18n="ui.boneLabels">nomes dos bones</span>
         </label>
+        <span class="cam-sep" aria-hidden="true"></span>
         <button data-cam="persp" class="ghost" data-i18n="cam.persp">perspectiva</button>
         <button data-cam="front" class="ghost" data-i18n="cam.front">frente</button>
         <button data-cam="side" class="ghost" data-i18n="cam.side">lado</button>
@@ -120,6 +134,75 @@
         <div id="canvas-mesh" class="canvas-wrap"><div class="pane-empty" id="empty-mesh" data-i18n="ref.loadClip">carregue um clipe</div></div>
       </div>
     </div>
+      </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabpane" id="pane-merge" hidden>
+    <div class="two-col">
+      <div class="col-controls">
+    <section class="panel" id="transplant-panel">
+    <h2 data-i18n="rsec.merge">Mistura entre dois jobs</h2>
+    <p class="hint" data-i18n="hint.transplant">
+      Dois backends no mesmo vídeo costumam errar em lugares diferentes. Marque as partes que quer
+      <b>pegar do outro job</b>; o resto do clipe continua como está.
+    </p>
+    <div id="tr-parts" class="tr-parts"></div>
+    <label class="inline-chk" data-i18n-title="tr.mapTitle"
+           title="Quando os dois jobs não são exatamente o mesmo trecho de vídeo, mapeie os frames da origem para os frames do destino.">
+      <input type="checkbox" id="tr-usar-mapa" />
+      <span data-i18n="tr.map">mapear intervalo de frames</span>
+    </label>
+    <div id="tr-mapa" class="grid2 tr-map" hidden>
+      <label class="field"><span data-i18n="tr.srcRange">frames da origem (A)</span>
+        <span class="range2"><input type="number" id="tr-s0" min="0" value="0" />
+        <input type="number" id="tr-s1" min="0" value="0" /></span></label>
+      <label class="field"><span data-i18n="tr.tgtRange">aplicar nos frames (B)</span>
+        <span class="range2"><input type="number" id="tr-t0" min="0" value="0" />
+        <input type="number" id="tr-t1" min="0" value="0" /></span></label>
+    </div>
+    <label class="inline-chk" data-i18n-title="tr.rootTitle"
+           title="copia também a trajetória do quadril (a raiz do rig).">
+      <input type="checkbox" id="tr-root" />
+      <span data-i18n="tr.root">copiar trajetória do quadril</span>
+    </label>
+    <div class="row-btns">
+      <button id="tr-apply" class="primary" data-i18n="tr.apply">aplicar mistura</button>
+      <button id="tr-undo" class="ghost" data-i18n="tr.undo">↶ desfazer mistura</button>
+    </div>
+    <p class="hint" id="tr-result" data-i18n="tr.idle">nenhuma mistura aplicada nesta sessão.</p>
+    </section>
+      </div>
+      <div class="col-preview">
+    <section class="panel">
+    <div class="cmp-row">
+      <div class="pane">
+        <div class="cmp-head">
+          <div class="pane-title" id="tr-title-a" data-i18n="tr.fromA">origem (A)</div>
+          <label class="field cmp-pick"><span data-i18n="tr.source">pegar as partes do job</span>
+            <select id="tr-source"></select></label>
+        </div>
+        <div id="canvas-a" class="canvas-wrap"><div class="pane-empty" id="empty-a">—</div></div>
+      </div>
+      <div class="pane">
+        <div class="cmp-head">
+          <div class="pane-title" id="tr-title-b" data-i18n="tr.toB">destino (B)</div>
+          <p class="cmp-target"><span data-i18n="tr.target">clip deste editor (destino)</span>
+            <b id="tr-target" class="mono">—</b></p>
+        </div>
+        <div id="canvas-b" class="canvas-wrap"><div class="pane-empty" id="empty-b">—</div></div>
+      </div>
+    </div>
+    <p class="hint" data-i18n="tr.cmpHint">
+      Os dois painéis usam a mesma câmera e o mesmo frame da timeline.
+    </p>
+    </section>
+      </div>
+    </div>
+  </div>
+
+  <section class="panel shared-foot">
     <div class="playbar">
       <button id="playpause" class="primary small">▶︎</button>
       <input type="range" id="timeline" min="0" max="1000" value="0" step="1" />
@@ -129,6 +212,6 @@
     <pre class="log" id="log" data-i18n="ref.logReady">pronto.</pre>
   </section>
 </main>
-<script type="module" src="/static/refine.js?v=7"></script>
+<script type="module" src="/static/refine.js?v=18"></script>
 </body>
 </html>

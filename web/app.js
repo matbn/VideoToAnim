@@ -27,6 +27,20 @@ let clock = null, pollTimer = null;
 let videoEl = null;
 let spanS = 0, videoReady = false;
 let playing = false;
+// Sincronismo com o video. `mediaTime` e o instante do frame REALMENTE
+// apresentado na tela (requestVideoFrameCallback); `video.currentTime` e o
+// relogio de reproducao, que corre À FRENTE do que ja foi pintado — usar ele
+// para dirigir o 3D produz um atraso constante de 1-2 frames (medido: 33-66 ms
+// a 30 fps), visivel na comparacao lado a lado.
+let mediaTime = null;
+let rvfcHandle = 0;
+let rvfcRunning = false;   // trava: uma cadeia so de requestVideoFrameCallback
+let scrubbing = false;      // o usuario esta arrastando a timeline
+let resumeAfterScrub = false;
+let vFps = 30, tFps = 30;      // fps do video de origem e fps da animacao exportada
+let lastFrameT = 0;            // instante do ULTIMO frame processado = (T-1)/vFps
+const PELVIS_Y = 0.98;         // altura pelvica de referencia (core/lifter.py)
+const SPINE_M = 0.52;          // comprimento da coluna usado pelo lifter
 const viewers = [];
 let no3d = false;
 const backendsByName = {};
@@ -148,8 +162,15 @@ class Viewer {
     (this.labelSprites || []).forEach((s) => { s.visible = this._labelsOn; });
   }
 
-  setTime(t) {
-    if (this.mixer && this.clipDuration > 0) this.mixer.setTime(t);
+  // `force` ignora o guarda de mudanca (usado no loop e no seek).
+  // Re-pinar o mixer 60x por segundo e desperdicado e reintroduz jitter: so
+  // reescreve quando o instante realmente mudou.
+  setTime(t, force) {
+    if (!this.mixer || !(this.clipDuration > 0)) return;
+    const at = Math.max(0, Math.min(t, this.clipDuration));
+    if (!force && this._lastT !== undefined && Math.abs(at - this._lastT) < 1e-4) return;
+    this._lastT = at;
+    this.mixer.setTime(at);
   }
 
   update(dt) {
@@ -157,8 +178,38 @@ class Viewer {
   }
 
   setCamera(name) {
+    if (name === 'video') { this.setCameraMatchVideo(); return; }
     this.camera.position.set(...(CAMERAS[name] || CAMERAS.persp));
     this.controls.target.set(0, 0.95, 0);
+    this.controls.update();
+  }
+
+  // Camera que reenquadra o 3D como o video de referencia esta enquadrado.
+  // Com a camera em (camX, camY, d) olhando para -Z, um ponto de mundo Y cai na
+  // fracao de altura  f = 1/2 - (Y - camY) / (2 d tan(fov/2)). O lifter pôs o
+  // quadril do primeiro frame em Y = 0.98 m e o tronco com 0.52 m, entao
+  // igualando as fracoes do video:
+  //   d    = 0.52 / (2 * (tronco_px / altura_video) * tan(fov/2))
+  //   camY = 0.98 - d tan(fov/2) * (1 - 2 py_quadril / altura_video)
+  // As fracoes batem exatamente (provado em tests/test_preview_sync.py).
+  setCameraMatchVideo() {
+    const cal = typeof videoCalibration === 'function' ? videoCalibration() : null;
+    if (!cal) {                       // sem video carregado: cai na perspective
+      this.camera.position.set(...CAMERAS.persp);
+      this.controls.target.set(0, 0.95, 0);
+      this.controls.update();
+      return;
+    }
+    const half = Math.tan((this.camera.fov * Math.PI / 180) / 2);
+    const fv = cal.torsoPx / cal.videoH;               // tronco como fracao da altura
+    const d = SPINE_M / (2 * Math.max(fv, 1e-3) * half);
+    const camY = PELVIS_Y - d * half * (1 - 2 * cal.hipPy / cal.videoH);
+    // eixo X: o personagem pode estar fora do centro do quadro
+    const s = SPINE_M / Math.max(cal.torsoPx, 1e-3);   // m por px do video
+    const xWorld = (cal.hipPx - cal.videoW / 2) * s;   // onde o lifter botou o quadril
+    const camX = xWorld - (2 * (cal.hipPx / cal.videoW) - 1) * d * half * this.camera.aspect;
+    this.camera.position.set(camX, camY, d);
+    this.controls.target.set(camX, camY, 0);
     this.controls.update();
   }
 
@@ -219,6 +270,7 @@ async function loadKp(id) {
     } catch (e) { handsData = null; }
   }
   drawKpOverlay();
+  reapplyCamera();
 }
 
 function drawKpOverlay(idx) {
@@ -310,20 +362,58 @@ function makeTextSprite(texto) {
 }
 
 // ------------------------------------------------------------------ loop
+// Enquadra o 3D como o video: usa as juntas 2D do primeiro frame (mid-hip e
+// mid-ombro) + o tamanho do video, que e exatamente a mesma geometria que o
+// lifter usou para liftar a pose. Sem isso a camera fica num lugar fixo e a
+// comparacao lado a lado fica com deslocamento/escala apparent.
+function videoCalibration() {
+  if (!kpData || !kpData.frames || !kpData.frames[0] || !kpData.width || !kpData.height) return null;
+  const f = kpData.frames[0];
+  if (!f[5] || !f[6] || !f[11] || !f[12]) return null;      // ombros/quadris
+  const mid = (a, b) => [(f[a][0] + f[b][0]) / 2, (f[a][1] + f[b][1]) / 2];
+  const hip = mid(11, 12);
+  const sho = mid(5, 6);
+  const torsoPx = Math.hypot(sho[0] - hip[0], sho[1] - hip[1]);
+  if (!(torsoPx > 1)) return null;
+  return { hipPx: hip[0], hipPy: hip[1], torsoPx, videoW: kpData.width, videoH: kpData.height };
+}
+
+// Instante do video -> instante da animacao. O frame i do video corresponde ao
+// frame i da animacao (um frame processado -> um keyframe), entao
+//   animTime = (mediaTime * vFps) / tFps.
+// Usar o tempo normalizado (mediaTime/spanS * clipDuration) compressa a
+// animacao: o GLB termina no ULTIMO keyframe, (T-1)/fps, e nao em T/fps — o
+// erro crescia de 0 a ~1 frame no fim do clipe.
+function animTimeFor(mediaT) {
+  if (!(vFps > 0) || !(tFps > 0)) return mediaT;
+  return (mediaT * vFps) / tFps;
+}
+
 function tick() {
   const dt = clock.getDelta();
-  const drivingByVideo = videoReady && spanS > 0;
+  const drivingByVideo = videoReady && spanS > 0 && lastFrameT > 0;
 
   if (drivingByVideo && videoEl && !videoEl.paused) {
-    if (videoEl.currentTime >= spanS - 0.02) {
+    // O loop e decidido pelo RELOGIO DO VIDEO (currentTime), nunca pelo
+    // mediaTime do requestVideoFrameCallback. O mediaTime so avanca quando o
+    // navegador APRESENTA um frame novo: usar ele aqui criava um travamento —
+    // ao dar wrap, a busca por 0 levava alguns ms até o frame 0 ser pintado,
+    // mediaTime ficava preso no ultimo instante e o wrap disparava de novo a
+    // CADA rAF (~60 buscas/s). O video tremia sem sair do lugar e o 3D
+    // ficava congelado no primeiro frame. currentTime realmente zera na busca.
+    if (videoEl.currentTime >= lastFrameT) {
       videoEl.currentTime = 0;                    // loop manual (vídeo + 3D juntos)
-      viewers.forEach((v) => v.setTime(0));
+      mediaTime = null;                           // descarta o instante antigo
+      viewers.forEach((v) => v.setTime(0, true));
+      setTimelineUI(0, true);
+    } else {
+      // a pose usa o frame JA APRESENTADO; currentTime e so a reserva quando o
+      // navegador nao tem requestVideoFrameCallback (ou ainda nao pintou nada)
+      const t = (mediaTime !== null && mediaTime <= videoEl.currentTime)
+        ? mediaTime : videoEl.currentTime;
+      viewers.forEach((v) => v.setTime(animTimeFor(t)));
+      setTimelineUI(Math.max(0, Math.min(1, videoEl.currentTime / lastFrameT)));
     }
-    const p = Math.max(0, Math.min(1, videoEl.currentTime / spanS));
-    const clip = Math.max(...viewers.map((v) => v.clipDuration), 0);
-    viewers.forEach((v) => v.setTime(p * v.clipDuration));
-    setTimelineUI(p);
-    void clip;
   } else if (!drivingByVideo) {
     viewers.forEach((v) => v.update(dt));
     const first = viewers.find((v) => v.clipDuration > 0 && v.action);
@@ -335,9 +425,22 @@ function tick() {
   viewers.forEach((v) => v.render());
 }
 
-function onResizeAll() { viewers.forEach((v) => v.onResize()); drawKpOverlay(); }
+function onResizeAll() {
+  viewers.forEach((v) => v.onResize());
+  reapplyCamera();
+  drawKpOverlay();
+}
 
-function setCameraAll(name) { viewers.forEach((v) => v.setCamera(name)); }
+let activeCam = 'persp';
+function setCameraAll(name) {
+  activeCam = name;
+  document.querySelectorAll('[data-cam]').forEach((b) =>
+    b.classList.toggle('active', b.dataset.cam === name));
+  viewers.forEach((v) => v.setCamera(name));
+}
+// Reaplica a camera ativa depois que o kp2d chega: a preset "video" so pode ser
+// calculada depois das juntas 2D (o clique no botao pode ter vindo antes).
+function reapplyCamera() { if (activeCam === 'video') viewers.forEach((v) => v.setCamera('video')); }
 
 
 // ------------------------------------------------------------------ abas
@@ -441,7 +544,10 @@ function openJobResult(job) {
       viewers[1].load(`/api/jobs/${jobId}/artifacts/glb`);
     }
   }
-  spanS = (job.metrics && job.metrics.video_span_s) || 0;
+  vFps = (job.metrics && job.metrics.video_fps) || 30;
+  tFps = (job.metrics && job.metrics.fps) || 30;
+  setSpan((job.metrics && job.metrics.video_span_s) || 0);
+  mediaTime = null;
   videoEl.src = `/api/jobs/${jobId}/artifacts/video`;
   videoEl.load();
   $('video-empty').style.display = 'none';
@@ -798,9 +904,19 @@ function enableDownload(id, url) {
 }
 
 // ------------------------------------------------------------------ vídeo
+// `video_span_s` (T/fps) e o que o backend gravou; o GLB, porem, termina no
+// ultimo keyframe, em (T-1)/fps. Recalcula o instante do ultimo frame sempre
+// que o span muda.
+function setSpan(span) {
+  spanS = Number(span) || 0;
+  const n = Math.max(0, Math.round(spanS * vFps));
+  lastFrameT = n > 0 ? (n - 1) / vFps : spanS;
+}
+
 function attachVideo(url, span) {
   if (!videoEl) return;
-  spanS = Number(span) || 0;
+  setSpan(span);
+  mediaTime = null;
   videoReady = false;
   videoEl.src = url;
   videoEl.load();
@@ -811,15 +927,16 @@ function attachVideo(url, span) {
 function maybeStartPlayback() {
   if (!videoReady || !videoEl.src) return;
   if (!viewers.every((v) => v.ready)) return;      // espera os dois 3D
-  if (!spanS || spanS > videoEl.duration) spanS = videoEl.duration;
+  if (!spanS || spanS > videoEl.duration) { setSpan(videoEl.duration); spanS = videoEl.duration; }
   const full = videoEl.duration - spanS;
   $('sync-note').textContent = full > 0.05
     ? t('hint.span', { a: spanS.toFixed(2), b: videoEl.duration.toFixed(2) })
     : t('hint.timeline');
   videoEl.currentTime = 0;
-  viewers.forEach((v) => v.setTime(0));
+  mediaTime = 0;
+  viewers.forEach((v) => v.setTime(0, true));
   setTimelineUI(0);
-  videoEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  videoEl.play().then(() => { setPlaying(true); pumpVideoFrame(); }).catch(() => setPlaying(false));
 }
 
 function setPlaying(v) {
@@ -837,26 +954,58 @@ function togglePlay() {
 }
 
 function resetViewer() {
+  stopVideoFramePump();
   if (videoEl) { videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load(); }
-  videoReady = false; spanS = 0; setPlaying(false);
+  mediaTime = null;
+  videoReady = false; spanS = 0; lastFrameT = 0; setPlaying(false);
   kpData = null;
   viewers.forEach((v) => { v.clear(); $(v.emptyId).style.display = ''; });
   $('video-empty').style.display = '';
   $('sync-note').textContent = t('hint.timeline');
 }
 
-function setTimelineUI(p) {
+function setTimelineUI(p, force) {
+  // Durante o arraste o slider e do USUARIO: escrever nele 60x/s (o que o
+  // playback fazia) fazia o arrasto voltar na mao e parecer que o evento
+  // nao funcionava. `force` deixa o proprio seek() atualizar o rotulo.
+  if (scrubbing && !force) return;
   p = Math.max(0, Math.min(1, p));
   $('timeline').value = String(Math.round(p * 1000));
-  const span = (videoReady && spanS > 0) ? spanS : Math.max(...viewers.map((v) => v.clipDuration), 0);
+  const span = (videoReady && spanS > 0) ? lastFrameT : Math.max(...viewers.map((v) => v.clipDuration), 0);
   $('time').textContent = `${(p * span).toFixed(2)} / ${span.toFixed(2)} s`;
 }
 
 function seek(value) {
   const p = Number(value) / 1000;
-  if (videoReady && spanS > 0) videoEl.currentTime = p * spanS;
-  viewers.forEach((v) => v.setTime(p * v.clipDuration));
-  setTimelineUI(p);
+  if (videoReady && spanS > 0) videoEl.currentTime = p * lastFrameT;
+  mediaTime = p * lastFrameT;
+  viewers.forEach((v) => v.setTime(animTimeFor(mediaTime), true));
+  setTimelineUI(p, true);
+}
+
+// Agenda o proximo callback de frame apresentado. Cada callback entrega o
+// instante do frame que o navegador JA PINTOU, que e o que o olho compara
+// com o 3D ao lado. Sem essa API (Safari < 15.4, Firefox < 132) cai para
+// `video.currentTime`, que adelanta 1-2 frames.
+//
+// `pumpVideoFrame` e idempotente: a cadeia se auto-reagenda, e o evento 'play'
+// tambem chama aqui — sem a trava, cada 'play' criava OUTRA cadeia que nunca
+// morria, e o mediaTime passava a ser reescrito varias vezes por frame.
+function pumpVideoFrame() {
+  if (!videoEl || rvfcRunning) return;
+  if (typeof videoEl.requestVideoFrameCallback !== 'function') return;
+  rvfcRunning = true;
+  rvfcHandle = videoEl.requestVideoFrameCallback((now, meta) => {
+    mediaTime = (meta && typeof meta.mediaTime === 'number') ? meta.mediaTime : videoEl.currentTime;
+    pumpVideoFrame();                       // a cadeia continua
+  });
+}
+
+function stopVideoFramePump() {
+  if (rvfcHandle && videoEl && videoEl.cancelVideoFrameCallback) {
+    videoEl.cancelVideoFrameCallback(rvfcHandle);
+  }
+  rvfcHandle = 0; rvfcRunning = false;
 }
 
 // 3D indisponivel: degrada com mensagem e mantem o resto da interface viva (US-01)
@@ -880,8 +1029,9 @@ window.addEventListener('DOMContentLoaded', () => {
   videoEl.playsInline = true;
   videoEl.addEventListener('loadeddata', () => { videoReady = true; maybeStartPlayback(); });
   videoEl.addEventListener('pause', () => setPlaying(false));
-  videoEl.addEventListener('play', () => setPlaying(true));
   videoEl.addEventListener('ended', () => setPlaying(false));
+  videoEl.addEventListener('play', () => { setPlaying(true); pumpVideoFrame(); });
+  videoEl.addEventListener('seeked', () => { if (videoEl.paused) mediaTime = videoEl.currentTime; });
 
   try {
     viewers.push(new Viewer('canvas-skel', 'empty-skel', { skeletonOnly: true }));
@@ -915,6 +1065,17 @@ window.addEventListener('DOMContentLoaded', () => {
   $('check-mesh').addEventListener('click', checkMesh);
   $('submit').addEventListener('click', submitJob);
   $('playpause').addEventListener('click', togglePlay);
+  // arrastar a timeline durante a reproduicao: pausa, deixa o arraste
+  // acontecer, e volta a tocar quando o usuario solta.
+  $('timeline').addEventListener('pointerdown', () => {
+    scrubbing = true;
+    if (videoEl && !videoEl.paused) { resumeAfterScrub = true; videoEl.pause(); }
+  });
+  window.addEventListener('pointerup', () => {
+    if (!scrubbing) return;
+    scrubbing = false;
+    if (resumeAfterScrub && videoEl) { resumeAfterScrub = false; videoEl.play().catch(() => {}); }
+  });
   $('timeline').addEventListener('input', (e) => seek(e.target.value));
   document.querySelectorAll('[data-cam]').forEach((b) =>
     b.addEventListener('click', () => setCameraAll(b.dataset.cam)));

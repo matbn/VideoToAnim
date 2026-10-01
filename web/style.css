@@ -117,6 +117,11 @@ button.small { width: auto; padding: 7px 14px; }
 .viewer-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .cameras { display: flex; gap: 8px; flex-wrap: wrap; }
 .cameras button { padding: 6px 12px; font-size: 12.5px; }
+/* divisor entre as opcoes de exibicao e as cameras */
+.cam-sep {
+  width: 1px; align-self: stretch; margin: 2px 4px;
+  background: var(--line);
+}
 
 .split { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 1200px) { .split { grid-template-columns: 1fr 1fr; } }
@@ -301,4 +306,217 @@ button.small { width: auto; padding: 7px 14px; }
   .hist-table td.hist-actions { white-space: normal; overflow: visible; }
   .hist-actions { gap: 2px; }
   .hist-actions .ghost { padding: 1px 5px; font-size: 10px; }
+}
+
+/* ------------------------------------------- mistura de partes entre jobs */
+.tr-parts { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; }
+.tr-parts .tr-part { padding: 4px 8px; border: 1px solid #ddd8cd; border-radius: 6px; cursor: pointer; }
+.tr-parts .tr-part:hover { background: #f3f0e9; }
+.row-btns { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.cmp-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0 6px; }
+.cmp-row .canvas-wrap { min-height: 260px; }
+.tr-map { margin: 8px 0; }
+.range2 { display: flex; gap: 6px; align-items: center; }
+.range2 input { width: 100%; }
+
+/* ------------------------------------------------------ abas do editor */
+.refine-tabs { display: flex; gap: 6px; margin-bottom: 4px; }
+.refine-tabs .tab {
+  padding: 7px 14px; font-size: 13px; border-radius: 8px; cursor: pointer;
+  background: #eeebe3; color: #5c584f; border: 1px solid transparent;
+}
+.refine-tabs .tab.active { background: #fbfaf7; color: #2b2a27; border-color: #d8d3c8; }
+.tabpane { display: flex; flex-direction: column; gap: 12px; }
+.tabpane[hidden] { display: none; }
+.shared-foot { position: sticky; bottom: 0; }
+.shared-foot .playbar { margin-bottom: 8px; }
+
+/* ==================================================================
+   Editor: duas colunas. Os CONTROLES rolam na coluna da esquerda e a
+   previa fica presa na direita, sempre visivel.
+
+   Sem isso da para ter que rolar a pagina inteira ate embaixo para ver
+   o estado, subir, mexer na adjuste, descer de novo para conferir...
+   A coluna de controles tem scroll proprio, entao a previa nunca sai
+   de vista.
+   ================================================================== */
+.two-col {
+  display: grid;
+  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.col-controls {
+  max-height: calc(100vh - 210px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+.col-preview { position: sticky; top: 8px; }
+/* a previa nunca deve ser menor que os controles, nem o contrario */
+.col-preview > .panel, .col-controls > .panel { margin: 0; }
+
+/* os tres paineis da previa se ajustam a largura da coluna */
+.two-col .split { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.two-col .split .canvas-wrap { min-height: 240px; }
+.two-col .cmp-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.two-col .cmp-row .canvas-wrap { min-height: 280px; }
+
+@media (max-width: 1180px) {
+  .two-col { grid-template-columns: minmax(0, 1fr); }
+  .col-controls { max-height: none; overflow: visible; }
+  .col-preview { position: static; }
+}
+
+/* ------------------------------------------------- abas: misturas e timeline */
+.cmp-pick { margin: 6px 0 8px; }
+.cmp-pick select { width: 100%; }
+.cmp-target { margin: 6px 0 8px; font-size: 12px; color: #6b665c; }
+.cmp-target b { color: #2b2a27; font-family: ui-monospace, Consolas, monospace; }
+
+/* arrastar a timeline durante a reproduicao nao pode ser atropelado pelo play */
+#timeline { cursor: pointer; }
+
+/* ==================================================================
+   Editor: trilhos explicitos de coluna.
+
+   O `.layout` herdado do pipeline e uma grade de 2 colunas, e os
+   controles ja ocupam a coluna 1 dentro do seu proprio `.two-col`.
+   Mas `nav.tabs` e `section.shared-foot` sao IRMAOS diretos do
+   `<main>`, entao caem na coluna 1 por auto-placement: as abas
+   abafavam os controles e a timeline ficava num beco estreito
+   embaixo delas. Aqui as tres pecas ganham trilho proprio:
+
+     linha 1 -> abas          (topo, centralizadas sobre a previa)
+     linha 2 -> previa        (coluna 2, sticky)
+     linha 3 -> timeline      (coluna 2, colada na previa)
+
+   Os controles de cada aba ficam na coluna 1, ocupando a altura
+   toda e rola por conta propria.
+   ================================================================== */
+.layout-editor .refine-tabs {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: center;
+  /* largura suficiente para as duas abas caberem numa linha so */
+  width: max-content;
+  max-width: 100%;
+  margin-bottom: 0;
+}
+/* "Mistura A/B" nao pode quebrar no meio do rotulo */
+.layout-editor .refine-tabs .tab { white-space: nowrap; }
+
+/* A coluna de controls e alta (4 secoes) e, sozinha, esticava a linha
+   do meio ate empurrar a timeline para fora da tela. A grade passa a
+   ter altura DEFINIDA e a linha do meio e `1fr`: sobra o que a previa
+   precisa, e a coluna de controls e limitada a essa altura e rola por
+   conta propria.
+
+   A previa NAO e transformada em flex de proposito: os canvas do
+   three.js medem o proprio tamanho no resize, e um `flex` os
+   deformaria ate o proximo evento de resize. O `ResizeObserver` do
+   `Viewer` (refine.js) e quem mantem o canvas em dia quando a caixa
+   muda por causa do layout. */
+.layout-editor {
+  /* A 1a coluna PRECISA ter a mesma largura da 1a coluna do .two-col
+     (440px). Com a do .layout herdado (380px) a coluna de controls
+     transbordava ~60px e cobria a timeline. */
+  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: calc(100vh - 118px);
+  /* O `.layout` herdado usa `align-items: start`, e essa e a raiz do
+     bug da timeline coberta: com `start` o `.tabpane` NAO estica ate
+     o trilho da linha 2, ele fica com a altura do CONTEUDO. Como o
+     `.col-controls` e limitado por `max-height: calc(100vh - 210px)`
+     (em pixels de viewport), o painel crescia ~265px alem do trilho e
+     passava por cima da timeline, que comeca logo abaixo. Aqui os
+     itens esticam e quem manda e a altura da linha. */
+  align-items: stretch;
+  row-gap: 12px;
+}
+.layout-editor .tabpane {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-height: 0;
+  height: 100%;
+}
+.layout-editor .tabpane > .two-col { height: 100%; min-height: 0; align-items: stretch; }
+.layout-editor .col-controls {
+  /* o teto herdado (`.col-controls { max-height: calc(100vh - 210px) }`)
+     e em pixels de viewport: numa janela baixa ele passa da altura da
+     linha da grade e o painel transborda por cima da timeline. Dentro
+     do editor quem manda e a linha (`height: 100%` + `min-height: 0`). */
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* A previa e a unica coluna que NAO rola: ela preenche a linha e o
+   `ResizeObserver` do `Viewer` (refine.js) reajusta os canvas do
+   three.js, que medem a caixa no resize. */
+.layout-editor .col-preview {
+  position: static;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.layout-editor .col-preview > .panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.layout-editor .col-preview .split,
+.layout-editor .col-preview .cmp-row {
+  flex: 1;
+  min-height: 0;
+}
+.layout-editor .col-preview .pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* a midia de cada painel cresce ate o espaco que sobrou na linha */
+.layout-editor .col-preview .canvas-wrap,
+.layout-editor .col-preview .video-box {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+.layout-editor .col-preview .pane video {
+  height: 100%;
+  min-height: 0;
+}
+.layout-editor .shared-foot {
+  /* a timeline fica na MESMA coluna da previa (2), e nao atravessando
+     a pagina: senao ela passava por cima da coluna de controls. */
+  grid-column: 2;
+  grid-row: 3;
+  margin-top: 0;
+  align-self: start;
+  position: static;
+}
+
+/* --- cabecalhos A/B alinhados ---------------------------------------
+   A tem <select> (faixa alta) e B so uma linha de texto. Sem uma
+   altura minima comum os dois canvas comecariam em linhas diferentes
+   e a comparacao lado a lado ficaria torta. O `min-height` trava o
+   topo dos dois paineis no mesmo pixel. */
+.two-col .cmp-head {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 84px;
+}
+.two-col .cmp-head .pane-title { margin-bottom: 6px; }
+/* o <select> da origem nao deve esticar a faixa alem do necessario */
+.two-col .cmp-head .cmp-pick { margin-bottom: 0; }
+
+@media (max-width: 1180px) {
+  /* em coluna unica as abas e a timeline ocupam a largura toda */
+  .layout-editor .refine-tabs,
+  .layout-editor .shared-foot { grid-column: 1 / -1; }
+  .layout-editor .refine-tabs { justify-self: stretch; }
+  .two-col .cmp-head { min-height: 0; }
 }
