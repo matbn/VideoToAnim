@@ -240,6 +240,114 @@ def test_edicao_invalida_da_erro_claro(noisy_anim):
     assert "animavel" in str(e3.value) or "nao tem rotacao" in str(e3.value)
 
 
+# ----------------------------------------------------------------------
+# 3b. Referencial dos euler: local (pai) x global (cena)
+# ----------------------------------------------------------------------
+def _anim_com_pai_girado(T: int = 5):
+    """Serie em que a cadeia de ancestrais esta girada: local != global."""
+    rots = {b: np.tile(np.array([0.0, 0.0, 0.0, 1.0]), (T, 1))
+            for b in mx.ANIMATED_BONES}
+    for t in range(T):
+        rots["Spine2"][t] = cons.euler_xyz_deg_to_quat(np.array([0.0, 0.0, 30.0]))
+        rots["LeftArm"][t] = cons.euler_xyz_deg_to_quat(np.array([0.0, 0.0, -62.0]))
+    root = np.tile(np.array([0.0, 0.98, 0.0]), (T, 1))
+    return Animation(30.0, T, list(mx.BONE_NAMES), rots, root, {})
+
+
+def test_local_e_global_sao_referenciais_diferentes():
+    """O painel tem de mostrar numeros diferentes nos dois espacos.
+
+    Sem pai girado os dois coincidem (no repouso local == mundo), e um teste
+    de "sao iguais" passaria sem provar nada: aqui a cadeia esta a -32 graus.
+    """
+    anim = _anim_com_pai_girado()
+    f = 2
+    frame_rots = {k: v[f] for k, v in anim.rotations.items()}
+    local = cons.quat_to_euler_xyz_deg(frame_rots["LeftForeArm"])
+    global_ = cons.quat_to_euler_xyz_deg(mx.world_rotation(frame_rots, "LeftForeArm"))
+    assert abs(global_[2] - local[2]) > 20.0, (
+        f"o teste precisa de um pai girado: local={local} global={global_}")
+
+
+@pytest.mark.parametrize("bone", ["LeftForeArm", "LeftHand", "Hips"])
+@pytest.mark.parametrize("space", ["local", "global"])
+def test_euler_faz_round_trip_nos_dois_espacos(bone, space):
+    """Ler o angulo e grava-lo de volta tem que devolver o MESMO quaternion.
+
+    E o criterio de aceite do toggle: se os dois espacos fossem inversos um do
+    outro, toda edicao local viraria global (e vice-versa) silenciosamente.
+    """
+    anim = _anim_com_pai_girado()
+    f = 2
+    bone_local = {k: v[f] for k, v in anim.rotations.items()}
+    ref = bone_local[bone] if space == "local" else mx.world_rotation(bone_local, bone)
+    euler = [float(x) for x in cons.quat_to_euler_xyz_deg(ref)]
+
+    out, rep = be.apply_edit(anim, be.BoneEdit(bone=bone, frame=f,
+                                              rotation_euler_deg=euler, space=space))
+    # a comparacao tem de ser feita NO MESMO espaco do round-trip: a
+    # Animation guarda o quaternion local, entao em `global` reconverte-se.
+    depois_local = {k: v[f] for k, v in out.rotations.items()}
+    got = depois_local[bone] if space == "local" else mx.world_rotation(depois_local, bone)
+    err = cons.quat_angle_deg(mx.quat_mul(got, mx.quat_conj(ref)))
+    assert err < 1e-6, f"round-trip {space} perdeu {err:.6f} graus"
+    assert rep["space"] == space
+
+
+def test_edicao_global_atinge_a_orientacao_absoluta():
+    """Pedir 45 graus no mundo tem que dar 45 graus no mundo."""
+    anim = _anim_com_pai_girado()
+    f = 2
+    out, _ = be.apply_edit(anim, be.BoneEdit(bone="LeftForeArm", frame=f,
+                                            rotation_euler_deg=[0.0, 0.0, 45.0],
+                                            space="global"))
+    frame_rots = {k: v[f] for k, v in out.rotations.items()}
+    world = cons.quat_to_euler_xyz_deg(mx.world_rotation(frame_rots, "LeftForeArm"))
+    assert abs(world[2] - 45.0) < 1e-6, f"globais pedido 45, veio {world}"
+
+    # ...e o MESMO numero em local tem que dar outra coisa (o pai gira junto)
+    out2, _ = be.apply_edit(anim, be.BoneEdit(bone="LeftForeArm", frame=f,
+                                             rotation_euler_deg=[0.0, 0.0, 45.0],
+                                             space="local"))
+    fr2 = {k: v[f] for k, v in out2.rotations.items()}
+    world2 = cons.quat_to_euler_xyz_deg(mx.world_rotation(fr2, "LeftForeArm"))
+    assert abs(world2[2] - 45.0) > 20.0, "local e global nao podem dar o mesmo resultado"
+
+
+def test_space_invalido_da_erro_claro(noisy_anim):
+    edit = be.BoneEdit(bone="Head", frame=0, rotation_euler_deg=[0, 0, 0], space="banana")
+    assert any("space" in e for e in edit.validate())
+    with pytest.raises(ValueError) as e:
+        be.apply_edit(noisy_anim, edit)
+    assert "space invalido" in str(e.value)
+
+
+def test_edicao_antiga_sem_space_continua_local():
+    """Retrocompatibilidade: historico salvo antes do campo nao pode quebrar."""
+    d = {"bone": "Head", "frame": 1, "rotation_euler_deg": [1, 2, 3]}
+    assert be.BoneEdit.from_dict(d).space == "local"
+    # e o round-trip serializa->dict preserva o espaco escolhido
+    assert be.BoneEdit(bone="Head", frame=1, rotation_euler_deg=[0, 0, 0],
+                       space="global").to_dict()["space"] == "global"
+
+
+def test_world_rotation_bate_com_a_fk():
+    """`world_rotation` tem que concordar com a FK (mesma empilhamento)."""
+    anim = _anim_com_pai_girado()
+    f = 2
+    frame_rots = {k: v[f] for k, v in anim.rotations.items()}
+    pos = mx.fk_world(frame_rots, np.asarray(anim.root_translation)[f])
+    for bone in ("LeftForeArm", "LeftHand", "Spine2"):
+        # a FK tambem empilha os ancestrais; comparamos via o offset do filho
+        child = mx._first_child(bone)
+        if child is None:
+            continue
+        v_fk = pos[child] - pos[bone]
+        v_q = mx.quat_rotate(mx.world_rotation(frame_rots, bone), mx.BONE_OFFSET[child])
+        cos = float(np.dot(v_fk, v_q) / (np.linalg.norm(v_fk) * np.linalg.norm(v_q)))
+        assert cos > 0.99999, f"{bone}: direcao da FK difere ({cos:.6f})"
+
+
 def test_historico_undo_redo_e_persistencia(tmp_path, noisy_anim):
     orig = {k: v.copy() for k, v in noisy_anim.rotations.items()}
     h = be.EditHistory(source="clipe.json")

@@ -6,16 +6,18 @@ persistido — assim fechar e reabrir a sessao nao perde trabalho.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from core.mixamo import BONE_PARENT, world_rotation
 from core.refine import boneedit_mod as be
 from core.refine import collision as collision_mod
 from core.refine import constraints as cons
-from core.refine import filter_plan, io as rio, report as rep_mod
+from core.refine import filter_plan, io as rio, report as rep_mod, transplant as tr
 from core.refine.filters import FILTERS
 
 # Sem import do app no topo: criaria um ciclo (app.py inclui este router).
@@ -244,23 +246,38 @@ def get_animation(job_id: str) -> dict:
         "fps": anim.fps,
         "num_frames": anim.num_frames,
         "animated_bones": [b for b in anim.rotations.keys()],
+        # o editor precisa da arvore paraconverter euler global -> quaternion
+        # local na previa ao vivo (so os ossos, nunca o no da cena)
+        "bone_parents": {b: p for b, p in BONE_PARENT.items()},
         "root_translation": np.asarray(anim.root_translation).round(5).tolist(),
         "history": hist.to_dict(),
     }
 
 
 @router.get("/animation/{job_id}/frame/{t}")
-def get_frame(job_id: str, t: int) -> dict:
+def get_frame(job_id: str, t: int, space: str = "local") -> dict:
+    """Pose do frame. `space` escolhe o referencial dos angulos X/Y/Z.
+
+    `local` (padrao) = rotacao do osso em relacao ao pai (eixos acompanham a
+    hierarquia). `global` = orientacao absoluta na cena (eixos do mundo).
+    O quaternion em `quat` e sempre o local, que e o que a Animation guarda.
+    """
     anim, _ = _load_current(job_id)
     if not (0 <= t < anim.num_frames):
         raise HTTPException(400, f"frame fora do clipe (0..{anim.num_frames - 1})")
+    if space not in be.EDIT_SPACES:
+        raise HTTPException(400, f"space invalido: {space!r} "
+                                 f"(use {' ou '.join(be.EDIT_SPACES)})")
+    frame_rots = {k: np.asarray(s[t], np.float64) for k, s in anim.rotations.items()}
     out = {}
     for bone, series in anim.rotations.items():
+        q_ref = frame_rots[bone] if space == "local" else world_rotation(frame_rots, bone)
         out[bone] = {
             "quat": np.asarray(series[t]).round(6).tolist(),
-            "euler_deg": np.asarray(cons.quat_to_euler_xyz_deg(series[t])).round(3).tolist(),
+            "euler_deg": np.asarray(cons.quat_to_euler_xyz_deg(q_ref)).round(3).tolist(),
         }
-    return {"frame": t, "bones": out, "root_translation": np.asarray(anim.root_translation[t]).round(5).tolist()}
+    return {"frame": t, "space": space, "bones": out,
+            "root_translation": np.asarray(anim.root_translation[t]).round(5).tolist()}
 
 
 class EditBody(BaseModel):
@@ -268,6 +285,7 @@ class EditBody(BaseModel):
     frame: int
     rotation_euler_deg: list[float] | None = None
     rotation: list[float] | None = None
+    space: str = "local"
     translation: list[float] | None = None
     start: int | None = None
     end: int | None = None
@@ -280,6 +298,7 @@ def post_edit(job_id: str, body: EditBody) -> dict:
     anim, hist = _load_current(job_id)
     edit = be.BoneEdit(bone=body.bone, frame=body.frame,
                        rotation=body.rotation, rotation_euler_deg=body.rotation_euler_deg,
+                       space=body.space,
                        translation=body.translation, start=body.start, end=body.end,
                        author=body.author, note=body.note)
     try:
@@ -349,6 +368,125 @@ class ApplyBody(BaseModel):
     use_constraints: bool = True
     use_collision: bool = True
     filters: list[str] | None = None      # quais filtros usar (default: o plano do arquivo)
+
+
+@router.get("/transplant/parts")
+def get_transplant_parts() -> dict:
+    """Partes do corpo que o usuario pode escolher de cada job."""
+    return {
+        "parts": [{"id": pid, "label": spec["label"], "bones": tr.part_bones(pid)}
+                  for pid, spec in tr.BODY_PARTS.items()],
+        "order": list(tr.PART_ORDER),
+    }
+
+
+class TransplantBody(BaseModel):
+    source_job: str
+    parts: list[str]
+    copy_root_translation: bool | None = None
+    # mapeamento de intervalo: frames da ORIGEM -> frames do DESTINO (inclusive)
+    source_range: list[int] | None = None
+    target_range: list[int] | None = None
+
+
+def _transplant_paths(job_id: str) -> tuple[Path, Path]:
+    """Sessao do transplante: onde ficam o clipe atual e o historico.
+
+    (Nome proprio: `_session_paths` ja existe e devolve so 2 caminhos.)
+    """
+    d = REFINE_DIR / job_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "current.json", d / "history.json"
+
+
+@router.post("/transplant/{job_id}")
+def post_transplant(job_id: str, body: TransplantBody) -> dict:
+    """Copia as partes escolhidas do job de origem para a sessao deste job.
+
+    O clipe resultante passa a ser o "atual" do job alvo (o que o editor e os
+    downloads ja leem), e o clipe anterior fica guardado para desfazer.
+    """
+    if body.source_job == job_id:
+        raise HTTPException(400, "origem e destino sao o mesmo job")
+    desconhecidas = [p for p in body.parts if p not in tr.BODY_PARTS]
+    if desconhecidas:
+        raise HTTPException(400, f"partes desconhecidas: {desconhecidas} "
+                                 f"(validas: {list(tr.BODY_PARTS)})")
+    if not body.parts:
+        raise HTTPException(400, "nenhuma parte selecionada")
+    try:
+        src = store.get(body.source_job)
+    except Exception:  # noqa: BLE001
+        src = None
+    if not src or src.get("status") != "done":
+        raise HTTPException(404, f"job de origem nao encontrado ou nao concluido: {body.source_job}")
+    try:
+        antes, _ = _load_current(job_id)
+        source, _ = _load_current(body.source_job)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, f"clipe ausente: {exc}") from exc
+
+    frame_map = None
+    if body.source_range or body.target_range:
+        if not (body.source_range and body.target_range):
+            raise HTTPException(400, "informe os DOIS intervalos (origem e destino), "
+                                     "ou nenhum para usar o clipe inteiro")
+        if len(body.source_range) != 2 or len(body.target_range) != 2:
+            raise HTTPException(400, "cada intervalo tem 2 valores: [inicio, fim] (inclusivo)")
+        frame_map = {"source": body.source_range, "target": body.target_range}
+
+    try:
+        novo, report = tr.transplant(antes, source, body.parts,
+                                     copy_root_translation=body.copy_root_translation,
+                                     frame_map=frame_map)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    report["source_job"] = body.source_job
+    report["target_job"] = job_id
+    report["vs_source"] = tr.difference_report(antes, novo, source, frame_map)
+
+    current, hist_path = _transplant_paths(job_id)
+    hist = be.EditHistory.load(hist_path) if hist_path.exists() else be.EditHistory()
+    hist.snapshots.append({"clip": rio.animation_to_dict(antes),
+                           "parts": list(body.parts), "source_job": body.source_job})
+    hist.updated_at = time.time()
+
+    rio.save_animation(novo, current)
+    rio.export_animation_glb(novo, REFINE_DIR / job_id / "current.glb",
+                             skin_mesh=_job_skin_mesh(job_id),
+                             rig=_job_mesh_rig(job_id))
+    rio.export_animation_fbx(novo, REFINE_DIR / job_id / "current.fbx")
+    rio.save_animation(novo, _job_dir(job_id) / "anim_refined.json")
+    hist.save(hist_path)
+    for key, name in (("glb_refined", "current.glb"), ("fbx_refined", "current.fbx")):
+        p = REFINE_DIR / job_id / name
+        store.set_artifact(job_id, key, str(p), p.stat().st_size)
+    return {"report": report, "history_len": len(hist.edits),
+            "snapshots": len(hist.snapshots)}
+
+
+@router.post("/transplant/{job_id}/undo")
+def post_transplant_undo(job_id: str) -> dict:
+    """Desfaz o ultimo transplante, voltando ao clipe anterior."""
+    _, hist_path = _transplant_paths(job_id)
+    if not hist_path.exists():
+        raise HTTPException(404, "sem historico para este job")
+    hist = be.EditHistory.load(hist_path)
+    if not hist.snapshots:
+        raise HTTPException(400, "nenhum transplante para desfazer")
+    snap = hist.snapshots.pop()
+    antes = rio.animation_from_dict(snap["clip"])
+    current, _ = _transplant_paths(job_id)
+    rio.save_animation(antes, current)
+    rio.export_animation_glb(antes, REFINE_DIR / job_id / "current.glb",
+                             skin_mesh=_job_skin_mesh(job_id),
+                             rig=_job_mesh_rig(job_id))
+    rio.export_animation_fbx(antes, REFINE_DIR / job_id / "current.fbx")
+    rio.save_animation(antes, _job_dir(job_id) / "anim_refined.json")
+    hist.save(hist_path)
+    return {"undone": snap.get("parts", []), "source_job": snap.get("source_job"),
+            "snapshots": len(hist.snapshots)}
 
 
 @router.post("/animation/{job_id}/apply")
