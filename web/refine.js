@@ -1,4 +1,4 @@
-// video2mixamo — editor de refinamento (bone editor + filtros + constraints).
+// VideoToAnim — editor de refinamento (bone editor + filtros + constraints).
 // Modo Redesign/Refinement: mesma linguagem visual do pipeline, página nova.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';

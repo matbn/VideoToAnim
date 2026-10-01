@@ -75,7 +75,7 @@ def main() -> int:
 
     (out / "results.json").write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    lines = ["# Benchmark — video2mixamo", "",
+    lines = ["# Benchmark — VideoToAnim", "",
              f"Videos: {', '.join(Path(v).name for v in args.videos)}",
              f"Backends: {', '.join(args.backends)}", "",
              "| video | backend | status | frames | wall (s) | score medio | FK pos (cm) | FK ang (deg) | GLB (B) | FBX (B) |",

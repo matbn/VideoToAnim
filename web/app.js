@@ -1,4 +1,4 @@
-// video2mixamo — SPA (three.js). Dropdown de backends, upload (vídeo + malha),
+// VideoToAnim — SPA (three.js). Dropdown de backends, upload (vídeo + malha),
 // status do job e comparação: vídeo de referência × esqueleto × malha.
 //
 // Sincronismo: o VÍDEO é a única fonte de tempo. Todos os visualizadores 3D são

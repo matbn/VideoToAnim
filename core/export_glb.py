@@ -271,7 +271,7 @@ def build_glb(anim: Animation, out_path: str | Path, radius: float = 0.022,
     nodes.append({"name": "Mesh", "mesh": 0, "skin": 0})
 
     gltf = {
-        "asset": {"version": "2.0", "generator": "video2mixamo"},
+        "asset": {"version": "2.0", "generator": "VideoToAnim"},
         "scene": 0,
         "scenes": [{"nodes": [mx.BONE_INDEX["Hips"], mesh_node]}],
         "nodes": nodes,

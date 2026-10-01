@@ -1,4 +1,4 @@
-# video2mixamo
+# VideoToAnim
 
 ## Português
 

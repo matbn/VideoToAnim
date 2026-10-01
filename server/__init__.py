@@ -1,1 +1,1 @@
-"""Servidor FastAPI do video2mixamo."""
+"""Servidor FastAPI do VideoToAnim."""

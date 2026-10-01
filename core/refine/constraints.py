@@ -319,7 +319,7 @@ def humanoid_preset(stiffness: float = 1.0) -> ConstraintPreset:
     return ConstraintPreset("humanoid", lim, stiffness)
 
 
-_HUMANOID_HEADER = """# Constraints articulares — preset humanoide (video2mixamo)
+_HUMANOID_HEADER = """# Constraints articulares — preset humanoide (VideoToAnim)
 #
 # kind:  cone  -> limita o angulo TOTAL da rotacao local (graus)
 #        bend  -> limita a FLEXAO REAL da junta (cotovelo/joelho), medida pela

@@ -110,7 +110,7 @@ class FilterPlan:
     def save(self, path: str | Path) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        text = ("# plano de filtragem (video2mixamo)\n"
+        text = ("# plano de filtragem (VideoToAnim)\n"
                 + _yaml_dump(self.to_dict()))
         p.write_text(text, encoding="utf-8")
 

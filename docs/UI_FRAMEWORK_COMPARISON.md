@@ -9,7 +9,7 @@ video upload; persistent job status panel; **3D preview with play/pause, timelin
 camera switching**; GLB and FBX download; local startup with a single command.
 
 > This comparison went through an **adversarial counter-check** (document
-> `.cluster/video2mixamo/subagent_02.md`), which corrected a common premise:
+> `.cluster/VideoToAnim/subagent_02.md`), which corrected a common premise:
 > Gradio's `gr.Model3D` **does play** the GLB animation on autoplay (Babylon viewer,
 > `animationAutoPlay=true` since PR #10993). What it does **not** offer is a control API
 > (play/pause/timeline/scrub) from Python. The decision below was rewritten with that correction.

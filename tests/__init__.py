@@ -1,1 +1,1 @@
-"""Testes do projeto video2mixamo."""
+"""Testes do projeto VideoToAnim."""

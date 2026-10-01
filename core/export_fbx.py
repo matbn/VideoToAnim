@@ -160,13 +160,13 @@ def build_fbx(anim: Animation, out_path: str | Path) -> dict:
 
 def _write_header(fh: TextIO, anim: Animation) -> None:
     fh.write("; FBX 7.4.0 project file\n")
-    fh.write("; Gerado por video2mixamo (exportador FBX ASCII puro)\n")
+    fh.write("; Gerado por VideoToAnim (exportador FBX ASCII puro)\n")
     fh.write("FBXHeaderExtension:  {\n")
     fh.write("    FBXHeaderVersion: 1003\n")
     fh.write("    FBXVersion: 7400\n")
     fh.write("    CreationTimeStamp:  {\n        Version: 1000\n        Year: 2026\n        Month: 1\n        Day: 1\n")
     fh.write("        Hour: 0\n        Minute: 0\n        Second: 0\n        Millisecond: 0\n    }\n")
-    fh.write('    Creator: "video2mixamo"\n')
+    fh.write('    Creator: "VideoToAnim"\n')
     fh.write("}\n")
     fh.write("GlobalSettings:  {\n")
     fh.write("    Version: 1000\n    Properties70:  {\n")

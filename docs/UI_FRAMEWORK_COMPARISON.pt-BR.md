@@ -9,7 +9,7 @@ plugins; upload de vídeo; painel de status de job persistente; **preview 3D com
 timeline (scrub) e troca de câmera**; download de GLB e FBX; subir local com um comando.
 
 > Este comparativo passou por **contraprova adversarial** (documento
-> `.cluster/video2mixamo/subagent_02.md`), que corrigiu uma premissa comum:
+> `.cluster/VideoToAnim/subagent_02.md`), que corrigiu uma premissa comum:
 > o `gr.Model3D` do Gradio **reproduz** a animação do GLB em autoplay (viewer Babylon,
 > `animationAutoPlay=true` desde o PR #10993). O que ele **não** oferece é API de controle
 > (play/pause/timeline/scrub) a partir do Python. A decisão abaixo foi reescrita com essa correção.

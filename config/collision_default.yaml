@@ -1,4 +1,4 @@
-# Anticolisao (video2mixamo)
+# Anticolisao (VideoToAnim)
 #
 # Capsulas por osso (segmento cabeca->filho de direcao + raio) com pares
 # curados que nao devem se interpenetrar. A cada execucao os tamanhos sao

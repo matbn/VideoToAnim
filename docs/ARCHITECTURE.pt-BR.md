@@ -1,4 +1,4 @@
-# Arquitetura — video2mixamo
+# Arquitetura — VideoToAnim
 
 ## English
 

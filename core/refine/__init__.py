@@ -1,4 +1,4 @@
-"""Camada de refinamento de animacoes (video2mixamo).
+"""Camada de refinamento de animacoes (VideoToAnim).
 
 Recebe uma `Animation` ja bakeada e devolve outra, refinada, sem tocar no
 original. Ordem de aplicacao (e o motivo):

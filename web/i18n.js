@@ -1,12 +1,12 @@
-// i18n do video2mixamo — portugues (padrao) e ingles.
+// i18n do VideoToAnim — portugues (padrao) e ingles.
 // Idioma inicial: ?lang= na URL -> localStorage('v2m:lang') -> navigator.language.
 // A troca de idioma recarrega a pagina (o estado vivo fica na URL/localStorage).
 const DICT = {
   pt: {
     // -------------------------------------------------------- comum / topo
-    'app.title': 'video2mixamo · laboratório de retarget',
+    'app.title': 'VideoToAnim · laboratório de retarget',
     'app.sub': 'vídeo → esqueleto Mixamo',
-    'ref.title': 'video2mixamo · refinamento',
+    'ref.title': 'VideoToAnim · refinamento',
     'ref.sub': 'refino de animação — filtros · constraints · editor de bone',
     'nav.refine': 'editor de refino →',
     'nav.back': '← voltar ao pipeline',
@@ -276,9 +276,9 @@ const DICT = {
     'ref.logReady': 'pronto.',
   },
   en: {
-    'app.title': 'video2mixamo · retarget lab',
+    'app.title': 'VideoToAnim · retarget lab',
     'app.sub': 'video → Mixamo skeleton',
-    'ref.title': 'video2mixamo · refinement',
+    'ref.title': 'VideoToAnim · refinement',
     'ref.sub': 'animation refine — filters · constraints · bone editor',
     'nav.refine': 'refine editor →',
     'nav.back': '← back to pipeline',

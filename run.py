@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="video2mixamo - servidor local")
+    parser = argparse.ArgumentParser(description="VideoToAnim - servidor local")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true")
@@ -26,7 +26,7 @@ def main() -> None:
 
     import uvicorn
 
-    print(f"video2mixamo em http://{args.host}:{args.port}", flush=True)
+    print(f"VideoToAnim em http://{args.host}:{args.port}", flush=True)
     if args.reload:
         uvicorn.run(
             "server.app:app", host=args.host, port=args.port,

@@ -389,7 +389,7 @@ class CollisionConfig:
 
 
 _HDR = (
-    "# Anticolisao (video2mixamo)\n"
+    "# Anticolisao (VideoToAnim)\n"
     "#\n"
     "# Capsulas por osso (segmento cabeca->filho de direcao + raio) com pares\n"
     "# curados que nao devem se interpenetrar. A cada execucao os tamanhos sao\n"

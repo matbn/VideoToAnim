@@ -1,1 +1,1 @@
-"""Nucleo do video2mixamo."""
+"""Nucleo do VideoToAnim."""

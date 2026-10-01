@@ -89,7 +89,7 @@ async def _lifespan(_app):
     _abort_pending_jobs()
 
 
-app = FastAPI(title="video2mixamo", version="1.0.0", lifespan=_lifespan)
+app = FastAPI(title="VideoToAnim", version="1.0.0", lifespan=_lifespan)
 
 
 @app.middleware("http")

@@ -1,4 +1,4 @@
-# Plano de filtragem padrao (video2mixamo)
+# Plano de filtragem padrao (VideoToAnim)
 #
 # Regras sao avaliadas em ordem; a ultima que casar com o osso vence.
 # Campos: name, params, bones (opcional = todos), start/end (intervalo de
