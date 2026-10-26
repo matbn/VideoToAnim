@@ -30,9 +30,9 @@ def test_categorias_de_licenca(registry):
     from core.adapter import LICENSE_CATEGORIES
 
     cats = registry.by_license_category()
-    assert {"vitpose", "mediapipe", "rtmpose"} <= set(cats["livre"])
-    assert {"openpose", "simplebaseline", "wham"} <= set(cats["nao_comercial"])
-    assert {"mhformer", "yolopose", "sam3dbody"} <= set(cats["licenca_a_parte"])
+    assert {"vitpose", "mediapipe", "rtmpose"} <= set(cats["free"])
+    assert {"openpose", "simplebaseline", "wham"} <= set(cats["non_commercial"])
+    assert {"mhformer", "yolopose", "sam3dbody"} <= set(cats["separate_license"])
     for rec in registry.list():
         assert rec.license_category in LICENSE_CATEGORIES, rec.name
         assert rec.license, f"{rec.name} sem descricao de licenca"
@@ -46,7 +46,7 @@ def test_mapping_body25_do_openpose(registry):
     assert "neck" not in cfg.mapping
     assert cfg.mapping["left_hip"] == COCO_INDEX["left_hip"]
     assert cfg.mapping["right_ankle"] == COCO_INDEX["right_ankle"]
-    assert cfg.license_category == "nao_comercial"
+    assert cfg.license_category == "non_commercial"
 
 
 def test_configuracao_de_cada_backend_e_valida(registry):

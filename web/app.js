@@ -1,17 +1,17 @@
-// VideoToAnim — SPA (three.js). Dropdown de backends, upload (vídeo + malha),
-// status do job e comparação: vídeo de referência × esqueleto × malha.
+//VideoToAnim — SPA (three.js). Dropdown backends, upload (video + mesh),
+//job status and comparison: reference video × skeleton × mesh.
 //
-// Sincronismo: o VÍDEO é a única fonte de tempo. Todos os visualizadores 3D são
-// posicionados a partir do tempo do vídeo (p = t / span), o loop é manual no fim
-// do trecho processado e o play só começa quando o vídeo e os GLB estão prontos.
+//Timing: VIDEO is the only source of time. All 3D viewers are
+//positioned from the video time (p = t / span), the loop is manual at the end
+//of the processed portion and play only starts when the video and GLB are ready.
 //
-// O painel "esqueleto" mostra o rig (ossos como linhas, via SkeletonHelper) sem
-// a malha. Se o job não tiver malha do usuário, os dois painéis 3D mostram o
-// esqueleto.
+//The "skeleton" panel shows the rig (bones as lines, via SkeletonHelper) without
+//the mesh. If the job does not have a user mesh, the two 3D panels show the
+//skeleton.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { t, applyStatic, langSwitcher, getLang } from './i18n.js?v=5';
+import { t, applyStatic, langSwitcher, getLang } from './i18n.js?v=15';
 
 const $ = (id) => document.getElementById(id);
 
@@ -27,33 +27,33 @@ let clock = null, pollTimer = null;
 let videoEl = null;
 let spanS = 0, videoReady = false;
 let playing = false;
-// Sincronismo com o video. `mediaTime` e o instante do frame REALMENTE
-// apresentado na tela (requestVideoFrameCallback); `video.currentTime` e o
-// relogio de reproducao, que corre À FRENTE do que ja foi pintado — usar ele
-// para dirigir o 3D produz um atraso constante de 1-2 frames (medido: 33-66 ms
-// a 30 fps), visivel na comparacao lado a lado.
+//Synchronization with the video. `mediaTime` is the frame instant REALLY
+//presented on the screen (requestVideoFrameCallback); `video.currentTime` and the
+//clock, which runs AHEAD of what has already been painted — use it
+//to drive 3D produces a constant delay of 1-2 frames (measured: 33-66 ms
+//at 30 fps), visible in the side-by-side comparison.
 let mediaTime = null;
 let rvfcHandle = 0;
-let rvfcRunning = false;   // trava: uma cadeia so de requestVideoFrameCallback
-let scrubbing = false;      // o usuario esta arrastando a timeline
+let rvfcRunning = false;   //hangs: a string of requestVideoFrameCallback
+let scrubbing = false;      //the user is dragging the timeline
 let resumeAfterScrub = false;
-let vFps = 30, tFps = 30;      // fps do video de origem e fps da animacao exportada
-let lastFrameT = 0;            // instante do ULTIMO frame processado = (T-1)/vFps
-const PELVIS_Y = 0.98;         // altura pelvica de referencia (core/lifter.py)
-const SPINE_M = 0.52;          // comprimento da coluna usado pelo lifter
+let vFps = 30, tFps = 30;      //fps of the source video and fps of the exported animation
+let lastFrameT = 0;            //instant of the LAST frame processed = (T-1)/vFps
+const PELVIS_Y = 0.98;         //reference pelvic height (core/lifter.py)
+const SPINE_M = 0.52;          //length of spine used by the lifter
 const viewers = [];
 let no3d = false;
 const backendsByName = {};
 
-// escapa texto para atributos HTML (US-06: tooltips com o valor completo)
+//escapes text for HTML attributes (US-06: tooltips with full value)
 const attresc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-// categorias de licenca (espelham core/adapter.py LICENSE_CATEGORIES)
+//license categories (mirror core/adapter.py LICENSE_CATEGORIES)
 const CAT_INFO = {
   livre: { label: 'livre', color: '#4f6d5c' },
   nao_comercial: { label: 'não comercial', color: '#b06a48' },
-  licenca_a_parte: { label: 'licença à parte', color: '#8a7a4a' },
+  licenca_a_parte: { label: 'separate license', color: '#8a7a4a' },
 };
 const catLabel = (c) => {
   const k = `cat.${c}`;
@@ -61,7 +61,7 @@ const catLabel = (c) => {
   return v === k ? (CAT_INFO[c] || { label: c }).label : v;
 };
 
-// ------------------------------------------------------------------ Viewer
+//------------------------------------------------------------------ Viewer
 class Viewer {
   constructor(hostId, emptyId, { skeletonOnly = false } = {}) {
     this.hostId = hostId;
@@ -120,7 +120,7 @@ class Viewer {
       this._criarLabels();
 
       if (this.skeletonOnly) {
-        // esconde a geometria e desenha o rig como linhas entre os ossos
+        //hides the geometry and draws the rig as lines between the bones
         this.model.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) o.visible = false; });
         const helper = new THREE.SkeletonHelper(this.model);
         helper.material.color = new THREE.Color(0x4f6d5c);
@@ -141,14 +141,14 @@ class Viewer {
       this.ready = true;
       $(this.emptyId).style.display = 'none';
       maybeStartPlayback();
-    }, undefined, (err) => console.error('erro ao carregar GLB', this.hostId, err));
+    }, undefined, (err) => console.error('error loading GLB', this.hostId, err));
   }
 
   _criarLabels() {
     this.labelSprites = [];
-    const filtro = /(Index|Middle|Ring|Pinky|Thumb)\d$/;
+    const filter = /(Index|Middle|Ring|Pinky|Thumb)\d$/;
     this.model.traverse((o) => {
-      if (o.isBone && !filtro.test(o.name)) {
+      if (o.isBone && !filter.test(o.name)) {
         const spr = makeTextSprite(o.name.replace(/^(?:mixamorig|mixamo)[:_]?/i, ''));
         spr.position.set(0, 0.025, 0);
         spr.visible = !!this._labelsOn;
@@ -162,16 +162,16 @@ class Viewer {
     (this.labelSprites || []).forEach((s) => { s.visible = this._labelsOn; });
   }
 
-  // `force` ignora o guarda de mudanca (usado no loop e no seek).
-  // Re-pinar o mixer 60x por segundo e desperdicado e reintroduz jitter: so
-  // reescreve quando o instante realmente mudou.
+  //`force` ignores the shift guard (used in loop and seek).
+  //Re-pinning the mixer 60x per second is wasted and reintroduces jitter: so
+  //rewrites when the instant actually changes.
   //
-  // Usamos `action.time` + `mixer.update(0)` e NAO `mixer.setTime()`: o
-  // `setTime` reseta o tempo interno da acao para 0 e re-evalua tudo a
-  // partir do estado parado. Num job recem-processado isso deixava a pose
-  // presa no primeiro frame — o video tocava e o 3D so andava quando o
-  // ciclo dava a volta e `setTime(0, true)` reescrevia o instante. Escrever
-  // `action.time` e pedir `update(0)` aplica o valor interpolado na hora.
+  //We use `action.time` + `mixer.update(0)` and NOT `mixer.setTime()`:
+  //`setTime` resets the internal time of the action to 0 and re-evaluates everything
+  //from the stopped state. In a recently processed job, this left the pose
+  //stuck on the first frame — the video played and the 3D only started when the
+  //cycle would go around and `setTime(0, true)` would rewrite the instant. To write
+  //`action.time` and asking `update(0)` applies the interpolated value at the time.
   setTime(t, force) {
     if (!this.mixer || !(this.clipDuration > 0)) return;
     const at = Math.max(0, Math.min(t, this.clipDuration));
@@ -196,29 +196,29 @@ class Viewer {
     this.controls.update();
   }
 
-  // Camera que reenquadra o 3D como o video de referencia esta enquadrado.
-  // Com a camera em (camX, camY, d) olhando para -Z, um ponto de mundo Y cai na
-  // fracao de altura  f = 1/2 - (Y - camY) / (2 d tan(fov/2)). O lifter pôs o
-  // quadril do primeiro frame em Y = 0.98 m e o tronco com 0.52 m, entao
-  // igualando as fracoes do video:
-  //   d    = 0.52 / (2 * (tronco_px / altura_video) * tan(fov/2))
-  //   camY = 0.98 - d tan(fov/2) * (1 - 2 py_quadril / altura_video)
-  // As fracoes batem exatamente (provado em tests/test_preview_sync.py).
+  //Camera that reframes the 3D as the reference video is framed.
+  //With the camera at (camX, camY, d) looking at -Z, a world point Y falls into
+  //height fraction f = 1/2 - (Y - camY) / (2 d tan(fov/2)). The lifter put the
+  //hip of the first frame in Y = 0.98 m and the torso with 0.52 m, so
+  //equating the fractions of the video:
+  //d = 0.52 / (2 * (trunk_px / video_height) * tan(fov/2))
+  //camY = 0.98 - d tan(fov/2) * (1 - 2 py_hip / height_video)
+  //The fractions match exactly (proven in tests/test_preview_sync.py).
   setCameraMatchVideo() {
     const cal = typeof videoCalibration === 'function' ? videoCalibration() : null;
-    if (!cal) {                       // sem video carregado: cai na perspective
+    if (!cal) {                       //no video loaded: drops into perspective
       this.camera.position.set(...CAMERAS.persp);
       this.controls.target.set(0, 0.95, 0);
       this.controls.update();
       return;
     }
     const half = Math.tan((this.camera.fov * Math.PI / 180) / 2);
-    const fv = cal.torsoPx / cal.videoH;               // tronco como fracao da altura
+    const fv = cal.torsoPx / cal.videoH;               //trunk as a fraction of height
     const d = SPINE_M / (2 * Math.max(fv, 1e-3) * half);
     const camY = PELVIS_Y - d * half * (1 - 2 * cal.hipPy / cal.videoH);
-    // eixo X: o personagem pode estar fora do centro do quadro
-    const s = SPINE_M / Math.max(cal.torsoPx, 1e-3);   // m por px do video
-    const xWorld = (cal.hipPx - cal.videoW / 2) * s;   // onde o lifter botou o quadril
+    //X axis: the character may be off center of the frame
+    const s = SPINE_M / Math.max(cal.torsoPx, 1e-3);   //m per px of the video
+    const xWorld = (cal.hipPx - cal.videoW / 2) * s;   //where the lifter put the hip
     const camX = xWorld - (2 * (cal.hipPx / cal.videoW) - 1) * d * half * this.camera.aspect;
     this.camera.position.set(camX, camY, d);
     this.controls.target.set(camX, camY, 0);
@@ -243,7 +243,7 @@ class Viewer {
   }
 }
 
-// ------------------------------------------- debug: overlay do esqueleto 2D
+//------------------------------------------- debug: 2D skeleton overlay
 const SKELETON_EDGES = [
   [0, 1], [0, 2], [1, 3], [2, 4], [5, 7], [7, 9], [6, 8], [8, 10],
   [5, 6], [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
@@ -322,7 +322,7 @@ function drawKpOverlay(idx) {
   drawHandsOverlay(ctx, s, ox, oy, idx === undefined ? kpFrameIndex() : idx);
 }
 
-// ------------------------------- maos detectadas (hand tracking) sobre o video
+//------------------------------- hands detected (hand tracking) on ​​the video
 const HAND_EDGES = [
   [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
   [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15],
@@ -350,8 +350,8 @@ function drawHandsOverlay(ctx, s, ox, oy, frameIdx) {
       ctx.beginPath(); ctx.arc(ox + p[0] * s, oy + p[1] * s, 2, 0, Math.PI * 2); ctx.fill();
     }
   };
-  desenha(hf.left, '#3d6fa8');    // mao esquerda
-  desenha(hf.right, '#b06a48');   // mao direita
+  desenha(hf.left, '#3d6fa8');    //left hand
+  desenha(hf.right, '#b06a48');   //right hand
 }
 
 function makeTextSprite(texto) {
@@ -373,15 +373,15 @@ function makeTextSprite(texto) {
   return spr;
 }
 
-// ------------------------------------------------------------------ loop
-// Enquadra o 3D como o video: usa as juntas 2D do primeiro frame (mid-hip e
-// mid-ombro) + o tamanho do video, que e exatamente a mesma geometria que o
-// lifter usou para liftar a pose. Sem isso a camera fica num lugar fixo e a
-// comparacao lado a lado fica com deslocamento/escala apparent.
+//------------------------------------------------------------------ loop
+//Frame the 3D like the video: use the 2D joints of the first frame (mid-hip and
+//mid-shoulder) + the video size, which is exactly the same geometry as the
+//lifter used to lift the pose. Without this, the camera remains in a fixed place and the
+//Side-by-side comparison has apparent displacement/scale.
 function videoCalibration() {
   if (!kpData || !kpData.frames || !kpData.frames[0] || !kpData.width || !kpData.height) return null;
   const f = kpData.frames[0];
-  if (!f[5] || !f[6] || !f[11] || !f[12]) return null;      // ombros/quadris
+  if (!f[5] || !f[6] || !f[11] || !f[12]) return null;      //shoulders/hips
   const mid = (a, b) => [(f[a][0] + f[b][0]) / 2, (f[a][1] + f[b][1]) / 2];
   const hip = mid(11, 12);
   const sho = mid(5, 6);
@@ -390,12 +390,12 @@ function videoCalibration() {
   return { hipPx: hip[0], hipPy: hip[1], torsoPx, videoW: kpData.width, videoH: kpData.height };
 }
 
-// Instante do video -> instante da animacao. O frame i do video corresponde ao
-// frame i da animacao (um frame processado -> um keyframe), entao
-//   animTime = (mediaTime * vFps) / tFps.
-// Usar o tempo normalizado (mediaTime/spanS * clipDuration) compressa a
-// animacao: o GLB termina no ULTIMO keyframe, (T-1)/fps, e nao em T/fps — o
-// erro crescia de 0 a ~1 frame no fim do clipe.
+//Video instant -> animation instant. Frame i of the video corresponds to
+//frame i of the animation (a processed frame -> a keyframe), then
+//animTime = (mediaTime * vFps) / tFps.
+//Using normalized time (mediaTime/spanS * clipDuration) compresses the
+//animation: the GLB ends at the LAST keyframe, (T-1)/fps, and not at T/fps — the
+//error grew from 0 to ~1 frame at the end of the clip.
 function animTimeFor(mediaT) {
   if (!(vFps > 0) || !(tFps > 0)) return mediaT;
   return (mediaT * vFps) / tFps;
@@ -406,21 +406,21 @@ function tick() {
   const drivingByVideo = videoReady && spanS > 0 && lastFrameT > 0;
 
   if (drivingByVideo && videoEl && !videoEl.paused) {
-    // O loop e decidido pelo RELOGIO DO VIDEO (currentTime), nunca pelo
-    // mediaTime do requestVideoFrameCallback. O mediaTime so avanca quando o
-    // navegador APRESENTA um frame novo: usar ele aqui criava um travamento —
-    // ao dar wrap, a busca por 0 levava alguns ms até o frame 0 ser pintado,
-    // mediaTime ficava preso no ultimo instante e o wrap disparava de novo a
-    // CADA rAF (~60 buscas/s). O video tremia sem sair do lugar e o 3D
-    // ficava congelado no primeiro frame. currentTime realmente zera na busca.
+    //The loop is decided by the VIDEO CLOCK (currentTime), never by
+    //requestVideoFrameCallback mediaTime. mediaTime only advances when the
+    //browser PRESENTS a new frame: using it here created a crash —
+    //when wrapping, the search for 0 took a few ms until frame 0 was painted,
+    //mediaTime would get stuck at the last moment and the wrap would trigger again
+    //EACH rAF (~60 searches/s). The video shook without moving in place and the 3D
+    //it was frozen in the first frame. currentTime actually zeroes in the search.
     if (videoEl.currentTime >= lastFrameT) {
-      videoEl.currentTime = 0;                    // loop manual (vídeo + 3D juntos)
-      mediaTime = null;                           // descarta o instante antigo
+      videoEl.currentTime = 0;                    //manual loop (video + 3D together)
+      mediaTime = null;                           //discard the old instant
       viewers.forEach((v) => v.setTime(0, true));
       setTimelineUI(0, true);
     } else {
-      // a pose usa o frame JA APRESENTADO; currentTime e so a reserva quando o
-      // navegador nao tem requestVideoFrameCallback (ou ainda nao pintou nada)
+      //the pose uses the frame ALREADY PRESENTED; currentTime and only the reserve when the
+      //browser does not have requestVideoFrameCallback (or has not painted anything yet)
       const t = (mediaTime !== null && mediaTime <= videoEl.currentTime)
         ? mediaTime : videoEl.currentTime;
       viewers.forEach((v) => v.setTime(animTimeFor(t)));
@@ -450,12 +450,12 @@ function setCameraAll(name) {
     b.classList.toggle('active', b.dataset.cam === name));
   viewers.forEach((v) => v.setCamera(name));
 }
-// Reaplica a camera ativa depois que o kp2d chega: a preset "video" so pode ser
-// calculada depois das juntas 2D (o clique no botao pode ter vindo antes).
+//Reapply the active camera after kp2d arrives: the "video" preset can only be
+//calculated after the 2D joints (the button click may have come before).
 function reapplyCamera() { if (activeCam === 'video') viewers.forEach((v) => v.setCamera('video')); }
 
 
-// ------------------------------------------------------------------ abas
+//------------------------------------------------------------------ tabs
 let activeTab = 'new';
 let histJobs = [];
 
@@ -511,7 +511,7 @@ async function loadHistory() {
     tr.addEventListener('dblclick', () => openJob(tr.dataset.id)));
 }
 
-// abre um job do historico no visualizador (sem reprocessar)
+//open a job from the history in the viewer (without reprocessing)
 function openJobResult(job) {
   const jobId = job.id;
   $('job-id').textContent = jobId;
@@ -539,7 +539,7 @@ function openJobResult(job) {
   const or = $('open-refine');
   or.href = `/refine?job=${jobId}`;
   or.classList.toggle('disabled', !done);
-  // o editor de refino abre automaticamente o job que estiver aberto aqui (aba padrao)
+  //the refinement editor automatically opens the job that is open here (default tab)
   try { localStorage.setItem('v2m:lastJob', jobId); } catch (e) { /* sem storage */ }
   const navRef = $('nav-refine');
   if (navRef) navRef.href = `/refine?job=${jobId}`;
@@ -573,8 +573,8 @@ async function openJob(id) {
   openJobResult(job);
 }
 
-// -------------------------------------------------------------- backends
-// rotulo curto do dispositivo de execucao (vem de install.compute)
+//-------------------------------------------------------------- backends
+//short execution device label (comes from install.compute)
 function deviceLabel(c) {
   if (!c || !c.device || c.device === 'cpu') return 'CPU';
   if (c.device === 'cuda') return 'GPU CUDA';
@@ -583,7 +583,7 @@ function deviceLabel(c) {
   return `GPU ${String(c.device).toUpperCase()}`;
 }
 
-// motivo do dispositivo em PT/EN (o servidor manda codigo + variaveis)
+//reason for the device in PT/EN (the server sends code + variables)
 function computeReason(c) {
   if (!c) return '';
   if (c.reason_code) {
@@ -613,7 +613,7 @@ function stLabel(s) {
 async function loadBackends() {
   const sel = $('backend');
   const health = $('health');
-  if (health) health.textContent = t('be.loading');   // US-03: estado visivel na sondagem
+  if (health) health.textContent = t('be.loading');   //US-03: visible status in the survey
   if (sel) sel.disabled = true;
   let data;
   try {
@@ -691,7 +691,7 @@ function updateHint() {
   $('backend-hint').textContent = partes.join(' · ');
 }
 
-// ------------------------------------------------------------------ instalar
+//------------------------------------------------------------------ install
 async function installSelected() {
   const name = $('backend').value;
   const btn = $('install-btn');
@@ -738,7 +738,7 @@ function pollInstall(name) {
   }, 1200);
 }
 
-// filtros de estabilizacao vem da API do refinamento (nao ficam hardcoded aqui)
+//stabilization filters come from the refinement API (not hardcoded here)
 async function loadRefineFilters() {
   const sel = $('refine-filter');
   if (!sel) return;
@@ -754,7 +754,7 @@ async function loadRefineFilters() {
       sel.appendChild(o);
     }
   } catch (e) {
-    console.error('nao foi possivel listar os filtros de refino', e);
+    console.error('could not list refine filters', e);
   }
 }
 
@@ -765,11 +765,11 @@ function updateMeshHint() {
     : t('hint.meshNone');
 }
 
-// O `<input type=file>` tem o botao e o texto "nenhum arquivo escolhido"
-// DESENHADOS PELO NAVEGADOR, no idioma do navegador. Como o input fica
-// transparente (ver `.file-pick` no CSS), escrevemos o nome escolhido no
-// rotulo ao lado — e ele volta ao texto neutro quando o campo esvazia
-// (o botao "limpar" do navegador dispara `change` com `files` vazio).
+//The `<input type=file>` has the button and the text "no file chosen"
+//DESIGNED BY THE BROWSER, in the browser language. How the input looks
+//transparent (see `.file-pick` in CSS), we write the chosen name in the
+//label next to it — and it returns to neutral text when the field empties
+//(the browser's "clear" button triggers `change` with empty `files`).
 function updateFileName(inputId, labelId) {
   const f = $(inputId) && $(inputId).files[0];
   const el = $(labelId);
@@ -821,7 +821,7 @@ function renderMeshInspect(j) {
   el.innerHTML = linhas.join('');
 }
 
-// ------------------------------------------------------------------ jobs
+//------------------------------------------------------------------ jobs
 async function submitJob() {
   const file = $('video').files[0];
   if (!file) { alert(t('alert.selectVideo')); return; }
@@ -832,7 +832,7 @@ async function submitJob() {
   };
   const mf = $('maxframes').value;
   if (mf) params.max_frames = Number(mf);
-  // camada de refino (filtro escolhido + constraints articulares)
+  //refinement layer (chosen filter + joint constraints)
   const rf = $('refine-filter') ? $('refine-filter').value : '';
   const rc = $('refine-constraints') ? $('refine-constraints').value === '1' : false;
   const rcol = $('use-collision') ? $('use-collision').checked : true;
@@ -840,7 +840,7 @@ async function submitJob() {
     params.refine = {};
     if (rf) params.refine.filters = { apply_to_translation: true, filters: [{ name: rf }] };
     if (rc) params.refine.constraints = true;
-    if (rcol) params.refine.collision = true;   // US-07
+    if (rcol) params.refine.collision = true;   //US-07
   }
   if ($('hands') && $('hands').checked) {
     params.hands = { enabled: true, num_hands: 2, mirror: true };
@@ -927,10 +927,10 @@ function enableDownload(id, url) {
   a.classList.remove('disabled');
 }
 
-// ------------------------------------------------------------------ vídeo
-// `video_span_s` (T/fps) e o que o backend gravou; o GLB, porem, termina no
-// ultimo keyframe, em (T-1)/fps. Recalcula o instante do ultimo frame sempre
-// que o span muda.
+//------------------------------------------------------------------ video
+//`video_span_s` (T/fps) and what the backend recorded; the GLB, however, ends at
+//last keyframe, in (T-1)/fps. Recalculates the instant of the last frame every time
+//that the span changes.
 function setSpan(span) {
   spanS = Number(span) || 0;
   const n = Math.max(0, Math.round(spanS * vFps));
@@ -950,7 +950,7 @@ function attachVideo(url, span) {
 
 function maybeStartPlayback() {
   if (!videoReady || !videoEl.src) return;
-  if (!viewers.every((v) => v.ready)) return;      // espera os dois 3D
+  if (!viewers.every((v) => v.ready)) return;      //wait for both 3D
   if (!spanS || spanS > videoEl.duration) { setSpan(videoEl.duration); spanS = videoEl.duration; }
   const full = videoEl.duration - spanS;
   $('sync-note').textContent = full > 0.05
@@ -989,9 +989,9 @@ function resetViewer() {
 }
 
 function setTimelineUI(p, force) {
-  // Durante o arraste o slider e do USUARIO: escrever nele 60x/s (o que o
-  // playback fazia) fazia o arrasto voltar na mao e parecer que o evento
-  // nao funcionava. `force` deixa o proprio seek() atualizar o rotulo.
+  //While dragging the slider and USER: write to it 60x/s (which
+  //playback did) made the drag return in hand and appear as if the event
+  //it didn't work. `force` lets seek() itself update the label.
   if (scrubbing && !force) return;
   p = Math.max(0, Math.min(1, p));
   $('timeline').value = String(Math.round(p * 1000));
@@ -1007,21 +1007,21 @@ function seek(value) {
   setTimelineUI(p, true);
 }
 
-// Agenda o proximo callback de frame apresentado. Cada callback entrega o
-// instante do frame que o navegador JA PINTOU, que e o que o olho compara
-// com o 3D ao lado. Sem essa API (Safari < 15.4, Firefox < 132) cai para
-// `video.currentTime`, que adelanta 1-2 frames.
+//Schedules the next presented frame callback. Each callback delivers the
+//instant of the frame that the browser has ALREADY PAINTED, which is what the eye compares
+//with 3D on the side. Without this API (Safari < 15.4, Firefox < 132) it drops to
+//`video.currentTime`, which takes 1-2 frames.
 //
-// `pumpVideoFrame` e idempotente: a cadeia se auto-reagenda, e o evento 'play'
-// tambem chama aqui — sem a trava, cada 'play' criava OUTRA cadeia que nunca
-// morria, e o mediaTime passava a ser reescrito varias vezes por frame.
+//`pumpVideoFrame` is idempotent: the chain reschedules itself, and the 'play' event
+//also called here — without the lock, each 'play' created ANOTHER chain that never
+//died, and mediaTime started to be rewritten several times per frame.
 function pumpVideoFrame() {
   if (!videoEl || rvfcRunning) return;
   if (typeof videoEl.requestVideoFrameCallback !== 'function') return;
   rvfcRunning = true;
   rvfcHandle = videoEl.requestVideoFrameCallback((now, meta) => {
     mediaTime = (meta && typeof meta.mediaTime === 'number') ? meta.mediaTime : videoEl.currentTime;
-    pumpVideoFrame();                       // a cadeia continua
+    pumpVideoFrame();                       //the chain continues
   });
 }
 
@@ -1032,7 +1032,7 @@ function stopVideoFramePump() {
   rvfcHandle = 0; rvfcRunning = false;
 }
 
-// 3D indisponivel: degrada com mensagem e mantem o resto da interface viva (US-01)
+//3D unavailable: degrades with message and keeps the rest of the interface alive (US-01)
 function showNo3D() {
   for (const id of ['empty-skel', 'empty-mesh']) {
     const el = $(id);
@@ -1045,7 +1045,7 @@ function showNo3D() {
   }
 }
 
-// ------------------------------------------------------------------ wire
+//------------------------------------------------------------------ wire
 window.addEventListener('DOMContentLoaded', () => {
   clock = new THREE.Clock();
   videoEl = $('refvideo');
@@ -1061,7 +1061,7 @@ window.addEventListener('DOMContentLoaded', () => {
     viewers.push(new Viewer('canvas-skel', 'empty-skel', { skeletonOnly: true }));
     viewers.push(new Viewer('canvas-mesh', 'empty-mesh'));
   } catch (err) {
-    console.error('falha ao iniciar o 3D (WebGL):', err);
+    console.error('failed to start 3D (WebGL):', err);
     viewers.length = 0;
     no3d = true;
   }
@@ -1086,14 +1086,14 @@ window.addEventListener('DOMContentLoaded', () => {
   $('backend').addEventListener('change', updateHint);
   $('install-btn').addEventListener('click', installSelected);
   $('mesh').addEventListener('change', updateMeshHint);
-  // o nome do arquivo escolhido, no rotulo ao lado do input invisivel
+  //the name of the chosen file, in the label next to the invisible input
   $('video').addEventListener('change', () => updateFileName('video', 'video-name'));
   $('mesh').addEventListener('change', () => updateFileName('mesh', 'mesh-name'));
   $('check-mesh').addEventListener('click', checkMesh);
   $('submit').addEventListener('click', submitJob);
   $('playpause').addEventListener('click', togglePlay);
-  // arrastar a timeline durante a reproduicao: pausa, deixa o arraste
-  // acontecer, e volta a tocar quando o usuario solta.
+  //drag the timeline during playback: pause, stop dragging
+  //happens, and plays again when the user releases it.
   $('timeline').addEventListener('pointerdown', () => {
     scrubbing = true;
     if (videoEl && !videoEl.paused) { resumeAfterScrub = true; videoEl.pause(); }
@@ -1118,7 +1118,7 @@ window.addEventListener('DOMContentLoaded', () => {
   rendererLoopStart();
 });
 
-// ---------------------------------------------------- sync rotation entre paineis
+//------------------------------------------------------- sync rotation between panels
 let syncRot = true;
 try { syncRot = localStorage.getItem('v2m:syncRot') !== '0'; } catch (e) { /* sem storage */ }
 

@@ -113,7 +113,7 @@ def test_plano_invalido_da_erro_claro(tmp_path):
     p2.write_text("filters:\n  - name: savgol\n    start: 50\n    end: 10\n", encoding="utf-8")
     with pytest.raises(ValueError) as e2:
         filter_plan.FilterPlan.load(p2)
-    assert "intervalo invalido" in str(e2.value)
+    assert "invalid interval" in str(e2.value)
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ def test_space_invalido_da_erro_claro(noisy_anim):
     assert any("space" in e for e in edit.validate())
     with pytest.raises(ValueError) as e:
         be.apply_edit(noisy_anim, edit)
-    assert "space invalido" in str(e.value)
+    assert "invalid space" in str(e.value)
 
 
 def test_edicao_antiga_sem_space_continua_local():

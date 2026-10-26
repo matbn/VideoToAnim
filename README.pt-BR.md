@@ -6,7 +6,7 @@
 
 - Python 3.11+
 - Windows, Linux ou macOS. GPU é opcional: tudo roda em CPU.
-- Internet na primeira carga (o three.js vem de CDN, além dos pesos do backend).
+- Internet na primeira carga para os pesos do backend (o three.js está vendored em `web/vendor/three/`).
 
 ## Instalação e execução
 

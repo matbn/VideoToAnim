@@ -21,7 +21,7 @@ dropdown**, retargets it to the **Mixamo skeleton** and exports a 3D animation a
 
 - Python 3.11+
 - Windows, Linux or macOS. A GPU is optional: everything runs on CPU.
-- Internet on first load (three.js comes from a CDN, plus the backend weights).
+- Internet on first load for the backend weights (three.js is vendored under `web/vendor/three/`).
 
 ## Setup and run
 

@@ -56,7 +56,7 @@ This document is also available in English: [LIMITATIONS.md](LIMITATIONS.md).
 12. **Fila serializada.** Um worker (para não disputar GPU). Jobs longos ficam
     em fila.
 13. **Sem autenticação.** É uma ferramenta local; não exponha à internet.
-14. **Preview 3D** carrega three.js via CDN (precisa de internet na primeira
+14. **Preview 3D** inclui uma cópia vendored do three.js em `web/vendor/three/` e a usa por padrão, funcionando mesmo sem CDN (a CDN não é mais necessária na primeira carga).
     carga).
 15. **Vídeo de referência**: o visualizador toca o vídeo enviado ao lado do esqueleto,
     sincronizados pela mesma timeline. O vídeo é servido pelo próprio servidor

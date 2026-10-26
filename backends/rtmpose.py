@@ -12,7 +12,7 @@ from typing import Sequence
 
 import numpy as np
 
-from core.adapter import CAT_LIVRE, AdapterConfig, ConfigurableAdapter
+from core.adapter import CAT_FREE, AdapterConfig, ConfigurableAdapter
 from core.canonical import COCO17
 from core.canonical import FramePose
 
@@ -29,7 +29,7 @@ def _cfg() -> AdapterConfig:
         smoothing="none",
         multi_person=True,
         license="Apache-2.0 (RTMPose/OpenMMLab) · rtmlib MIT",
-        license_category=CAT_LIVRE,
+        license_category=CAT_FREE,
         notes="COCO-17 nativo. rtmlib baixa o ONNX (~48 MB) na 1a execucao e roda em "
               "onnxruntime (GPU CUDA quando disponivel; senao CPU). Sem mmcv.",
     )

@@ -11,7 +11,7 @@ from typing import Sequence
 
 import numpy as np
 
-from core.adapter import CAT_NAO_COMERCIAL, AdapterConfig, ConfigurableAdapter
+from core.adapter import CAT_NON_COMMERCIAL, AdapterConfig, ConfigurableAdapter
 from core.canonical import COCO17
 
 
@@ -25,7 +25,7 @@ def _cfg() -> AdapterConfig:
         temporal="frame",
         multi_person=True,
         license="MIT (Microsoft); pesos 'for research purpose'",
-        license_category=CAT_NAO_COMERCIAL,
+        license_category=CAT_NON_COMMERCIAL,
         notes="COCO-17 nativo, single-frame, requer bbox. Codigo de 2018.",
     )
 

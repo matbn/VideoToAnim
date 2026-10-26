@@ -14,7 +14,7 @@ from typing import Sequence
 
 import numpy as np
 
-from core.adapter import CAT_LICENCA_A_PARTE, AdapterConfig, ConfigurableAdapter
+from core.adapter import CAT_SEPARATE_LICENSE, AdapterConfig, ConfigurableAdapter
 from core.canonical import COCO17
 
 # MHR -> COCO-17 (mapeamento PARCIAL: o rig MHR tem muito mais juntas que o COCO)
@@ -40,7 +40,7 @@ def _cfg() -> AdapterConfig:
         temporal="frame",
         multi_person=True,
         license="SAM License (Meta) — permissiva para uso comercial, porem share-alike",
-        license_category=CAT_LICENCA_A_PARTE,
+        license_category=CAT_SEPARATE_LICENSE,
         notes="Recuperacao de MALHA (nao so keypoints): saida MHR. Mapeamento MHR->COCO-17 e "
               "PARCIAL (o rig tem muito mais juntas). Exige pesos e codigo do repo oficial.",
     )

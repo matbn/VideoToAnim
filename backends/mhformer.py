@@ -14,7 +14,7 @@ from typing import Sequence
 
 import numpy as np
 
-from core.adapter import CAT_LICENCA_A_PARTE, AdapterConfig, ConfigurableAdapter
+from core.adapter import CAT_SEPARATE_LICENSE, AdapterConfig, ConfigurableAdapter
 from core.canonical import COCO17
 
 H36M_17 = [
@@ -54,7 +54,7 @@ def _cfg() -> AdapterConfig:
         window=243,
         smoothing="none",
         license="MIT (codigo MHFormer); pesos declarados para pesquisa",
-        license_category=CAT_LICENCA_A_PARTE,
+        license_category=CAT_SEPARATE_LICENSE,
         notes="Saida 3D H36M (y-up). Janela temporal: precisa de >100 frames de contexto. "
               "Exige detector 2D upstream.",
     )

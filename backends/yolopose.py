@@ -13,7 +13,7 @@ from typing import Sequence
 
 import numpy as np
 
-from core.adapter import CAT_LICENCA_A_PARTE, AdapterConfig, ConfigurableAdapter
+from core.adapter import CAT_SEPARATE_LICENSE, AdapterConfig, ConfigurableAdapter
 from core.canonical import COCO17
 
 
@@ -29,7 +29,7 @@ def _cfg() -> AdapterConfig:
         smoothing="none",
         multi_person=True,
         license="AGPL-3.0 (Ultralytics) — copyleft; licenca comercial separada disponivel",
-        license_category=CAT_LICENCA_A_PARTE,
+        license_category=CAT_SEPARATE_LICENSE,
         notes="COCO-17. Usa keypoints.xy (pixels) e keypoints.conf. Requer "
               "'pip install ultralytics'. AGPL: avalie o impacto antes de distribuir.",
     )

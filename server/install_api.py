@@ -1,4 +1,4 @@
-"""API de instalacao automatica dos backends (primeiro uso / botao no dropdown)."""
+"""API for automatic backend installation (first use / dropdown button)."""
 from __future__ import annotations
 
 import threading
@@ -43,11 +43,11 @@ def install_status(backend: str) -> dict:
 def start_install(backend: str, force: bool = False) -> dict:
     reg = build_registry(ROOT / "plugins")
     if reg.get(backend) is None:
-        raise HTTPException(404, f"backend desconhecido: {backend}")
+        raise HTTPException(404, f"unknown backend: {backend}")
     plan = plan_for(backend)
     if plan.kind == "manual" or not plan.steps:
         raise HTTPException(
-            400, f"{backend} nao pode ser instalado automaticamente: {plan.manual_reason}")
+            400, f"{backend} cannot be installed automatically: {plan.manual_reason}")
     st = _state(backend)
     if st["status"] == "running":
         return {"backend": backend, "status": "running", "log": st["log"]}
@@ -56,7 +56,7 @@ def start_install(backend: str, force: bool = False) -> dict:
         st["status"] = "running"
         st["log"] = ""
         st["report"] = None
-        _log(backend, f"iniciando instalacao de {backend} ({plan.kind})")
+        _log(backend, f"starting installation of {backend} ({plan.kind})")
         try:
             rep = run_plan(backend, force=force, log=lambda m: _log(backend, m))
             rep["available_after"] = _check_available(backend)

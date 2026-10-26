@@ -19,7 +19,7 @@ from typing import Sequence
 
 import numpy as np
 
-from core.adapter import CAT_LIVRE, AdapterConfig, ConfigurableAdapter
+from core.adapter import CAT_FREE, AdapterConfig, ConfigurableAdapter
 from core.canonical import COCO17
 
 H36M_17 = [
@@ -50,7 +50,7 @@ def _cfg() -> AdapterConfig:
         window=243,
         smoothing="none",
         license="Apache-2.0 (MotionBERT) — codigo e pesos do repo oficial",
-        license_category=CAT_LIVRE,
+        license_category=CAT_FREE,
         notes="Lifting temporal (janela ~243 frames). Precisa de detector 2D upstream. "
               "Requer torch + pesos do HF (walterzhu/MotionBERT).",
     )

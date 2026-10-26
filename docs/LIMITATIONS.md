@@ -28,6 +28,6 @@ Este documento também está disponível em português: [LIMITATIONS.pt-BR.md](L
 
 12. **Serialized queue.** One worker (to avoid GPU contention). Long jobs queue up.
 13. **No authentication.** This is a local tool; do not expose it to the internet.
-14. **3D preview** loads three.js via CDN (needs internet on first load).
+14. **3D preview** ships a vendored copy of three.js under `web/vendor/three/` and uses it by default, so it works even when the CDN is unreachable (the CDN is no longer required for first load).
 15. **Reference video**: the viewer plays the uploaded video next to the skeleton, synced by the same timeline. The video is served by the server itself (`/api/jobs/{id}/artifacts/video`, with Range) and stays on disk as long as the job exists.
 16. **Analytic lifter** is heuristic (anthropometric priors + depth continuity). For truer 3D, swap it for MotionBERT (the `Lifter` interface is ready) or use a backend that already delivers 3D.

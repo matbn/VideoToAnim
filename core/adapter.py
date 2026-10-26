@@ -22,13 +22,13 @@ from .canonical import NUM_JOINTS, FramePose, empty_pose
 # backend, e sim uma informacao que o usuario ve no dropdown).
 # ---------------------------------------------------------------------------
 LICENSE_CATEGORIES = {
-    "livre":            "Livre — uso comercial permitido (MIT/Apache/BSD)",
-    "nao_comercial":    "Não comercial — só pesquisa/uso acadêmico",
-    "licenca_a_parte":  "Licença à parte — copyleft, share-alike ou termos próprios",
+    "free":             "Free — commercial use allowed (MIT/Apache/BSD)",
+    "non_commercial":   "Non-commercial — research/academic use only",
+    "separate_license": "Separate license — copyleft, share-alike or own terms",
 }
-CAT_LIVRE = "livre"
-CAT_NAO_COMERCIAL = "nao_comercial"
-CAT_LICENCA_A_PARTE = "licenca_a_parte"
+CAT_FREE = "free"
+CAT_NON_COMMERCIAL = "non_commercial"
+CAT_SEPARATE_LICENSE = "separate_license"
 
 
 @dataclass
@@ -59,7 +59,7 @@ class AdapterConfig:
     score_threshold: float = 0.2
     multi_person: bool = False
     license: str = ""
-    license_category: str = CAT_LIVRE
+    license_category: str = CAT_FREE
     notes: str = ""
 
     def native_index(self) -> dict[str, int]:
@@ -130,7 +130,7 @@ class PoseBackend(ABC):
     # backends de teste/infra nao aparecem no dropdown (mas seguem no registry)
     hidden_from_ui: bool = False
     # categoria de licenca (pode vir da AdapterConfig; aqui e o fallback)
-    license_category: str = CAT_LIVRE
+    license_category: str = CAT_FREE
 
     def __init__(self) -> None:
         self._loaded = False

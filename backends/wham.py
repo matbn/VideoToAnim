@@ -14,7 +14,7 @@ from typing import Sequence
 
 import numpy as np
 
-from core.adapter import CAT_NAO_COMERCIAL, AdapterConfig, ConfigurableAdapter
+from core.adapter import CAT_NON_COMMERCIAL, AdapterConfig, ConfigurableAdapter
 from core.canonical import COCO17
 
 # SMPL-24 -> COCO-17
@@ -47,7 +47,7 @@ def _cfg() -> AdapterConfig:
         window=243,
         multi_person=False,
         license="Codigo MIT, mas depende do SMPL/SMPL-X (Max Planck) — NON-COMMERCIAL",
-        license_category=CAT_NAO_COMERCIAL,
+        license_category=CAT_NON_COMMERCIAL,
         notes="Malha SMPL world-grounded. Exige corpo SMPL (licenca nao-comercial) + torch. "
               "Mapeamento SMPL-24 -> COCO-17 e parcial.",
     )

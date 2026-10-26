@@ -1,4 +1,4 @@
-"""API FastAPI + servidor da SPA (three.js)."""
+"""FastAPI API + SPA server (three.js)."""
 from __future__ import annotations
 
 import json
@@ -30,15 +30,15 @@ WEB_DIR = ROOT / "web"
 STORAGE.mkdir(parents=True, exist_ok=True)
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
-from core import i18n as _i18n  # noqa: E402  (log dos jobs segue o idioma da UI)
+from core import i18n as _i18n  # noqa: E402  (job logs follow the UI language)
 
 store = JobStore(JOBS_DB)
 registry = build_registry(ROOT / "plugins")
 
-# Fila de jobs com UMA thread DAEMON. (Antes era um ThreadPoolExecutor: ao
-# encerrar, o interpretador espera as futures pendentes do executor -- com jobs
-# rodando/enfileirados o processo ficava preso em "Shutting down" ate a fila
-# drenar por completo. Relatado pelo usuario em 29/09/2026.)
+# Job queue with a SINGLE DAEMON thread. (Previously a ThreadPoolExecutor: on
+# shutdown, the interpreter waits for pending futures -- with running/enqueued
+# jobs the process hung on "Shutting down" until the queue fully drained.
+# Reported by a user on 29/09/2026.)
 _JOB_QUEUE: "queue.Queue[tuple]" = queue.Queue()
 _CURRENT_JOB: dict = {"id": None}
 
@@ -53,7 +53,7 @@ def _mark_aborted(job_id: str) -> None:
 
 
 def _abort_pending_jobs() -> None:
-    """No shutdown: job em execucao e os ainda na fila viram 'interrompido'."""
+    """On shutdown: the running job and those still in the queue become 'interrupted'."""
     cur = _CURRENT_JOB.get("id")
     if cur:
         try:
@@ -72,7 +72,7 @@ def _abort_pending_jobs() -> None:
 
 
 def _mark_stale_jobs() -> None:
-    """No boot: jobs running/queued de um processo anterior sao interrompidos."""
+    """On boot: running/queued jobs from a previous process are interrupted."""
     try:
         jobs = store.list(limit=500)
     except Exception:  # noqa: BLE001
@@ -94,10 +94,10 @@ app = FastAPI(title="VideoToAnim", version="1.0.0", lifespan=_lifespan)
 
 @app.middleware("http")
 async def _no_store_assets(request, call_next):
-    """Ferramenta local: nunca deixar HTML/JS/CSS em cache.
-
-    Sem isto o navegador pode continuar servindo o app.js/style.css antigos
-    depois de uma atualizacao do codigo ("corrigi, mas continua igual").
+    """Local tool: never cache HTML/JS/CSS.
+    
+    Without this the browser may keep serving stale app.js/style.css
+    after a code update ("I fixed it, but it stays the same").
     """
     resp = await call_next(request)
     p = request.url.path
@@ -144,7 +144,7 @@ def _run_job(job_id: str, video_path: Path, backend: str, params: dict,
 
 
 def _job_worker() -> None:
-    """Worker unico (serializa os jobs como o antigo executor de 1 worker)."""
+    """Single worker (serializes jobs like the old 1-worker executor)."""
     while True:
         job_id, video_path, backend, params, mesh_path = _JOB_QUEUE.get()
         _CURRENT_JOB["id"] = job_id
@@ -160,7 +160,7 @@ def _job_worker() -> None:
             _CURRENT_JOB["id"] = None
 
 
-# thread daemon: o encerramento do processo NUNCA espera jobs pendentes
+# daemon thread: process shutdown NEVER waits for pending jobs
 threading.Thread(target=_job_worker, name="v2m-job-worker", daemon=True).start()
 
 
@@ -169,16 +169,16 @@ def health() -> dict:
     return {"status": "ok", "backends": len(registry.list()), "registry_errors": registry.errors}
 
 
-# US-03: /api/backends custa segundos (sonda de compute por backend). Cache TTL
-# curto por processo; invalidado apos instalacoes (server.install_api) e
-# desativado sob pytest para nao mascarar estado entre testes.
+# US-03: /api/backends costs seconds (compute probe per backend). Short TTL
+# cache per process; invalidated after installs (server.install_api) and
+# disabled under pytest to avoid masking state between tests.
 _BACKENDS_CACHE: dict = {}
 _BACKENDS_TTL_S = 30.0
 
 
 @app.get("/api/backends")
 def list_backends(include_hidden: bool = False) -> dict:
-    """Backends que aparecem no dropdown (oculta os de teste/infra por padrao)."""
+    """Backends shown in the dropdown (hides test/infra ones by default)."""
     import os as _os
     import time as _time
 
@@ -204,7 +204,7 @@ def list_backends(include_hidden: bool = False) -> dict:
 @app.post("/api/mesh/inspect")
 async def inspect_mesh_file(mesh: UploadFile = File(...),
                             lang: str = Form("pt")) -> dict:
-    """Diagnostico de uma malha antes de processar: formato, esqueleto e se e anexavel."""
+    """Diagnose a mesh before processing: format, skeleton and whether it is attachable."""
     from core.mesh import check_compatibility, load_mesh
 
     lang = _i18n.norm_lang(lang)
@@ -252,21 +252,21 @@ async def create_job(
 ) -> JSONResponse:
     rec = registry.get(backend)
     if rec is None:
-        raise HTTPException(400, f"backend desconhecido: {backend}")
+        raise HTTPException(400, f"unknown backend: {backend}")
     if not rec.available:
-        raise HTTPException(400, f"backend '{backend}' indisponivel: {rec.reason}")
+        raise HTTPException(400, f"backend '{backend}' unavailable: {rec.reason}")
     try:
         parsed = json.loads(params or "{}")
         if not isinstance(parsed, dict):
-            raise ValueError("params deve ser um objeto JSON")
+            raise ValueError("params must be a JSON object")
     except (ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(400, f"params invalido: {exc}") from exc
+        raise HTTPException(400, f"invalid params: {exc}") from exc
 
     lang = _i18n.norm_lang(lang)
 
     data = await video.read()
     if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
-        raise HTTPException(413, f"arquivo maior que {MAX_UPLOAD_MB} MB")
+        raise HTTPException(413, f"file larger than {MAX_UPLOAD_MB} MB")
 
     job_id = store.create(video.filename or "video", len(data), backend, parsed,
                           lang=lang)
@@ -313,7 +313,7 @@ def list_jobs(status: str | None = None, backend: str | None = None,
 def get_job(job_id: str) -> dict:
     job = store.get(job_id)
     if job is None:
-        raise HTTPException(404, "job nao encontrado")
+        raise HTTPException(404, "job not found")
     return job
 
 
@@ -328,15 +328,15 @@ _MEDIA_TYPES = {
 def download_artifact(job_id: str, name: str) -> FileResponse:
     job = store.get(job_id)
     if job is None:
-        raise HTTPException(404, "job nao encontrado")
+        raise HTTPException(404, "job not found")
     art = (job.get("artifacts") or {}).get(name)
     if not art:
-        raise HTTPException(404, f"artefato '{name}' indisponivel")
+        raise HTTPException(404, f"artifact '{name}' unavailable")
     path = Path(art["path"])
     if not path.exists():
-        raise HTTPException(404, "arquivo nao encontrado no disco")
+        raise HTTPException(404, "file not found on disk")
     media = _MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
-    # "video" e servido inline (para tocar junto do esqueleto); os demais baixam
+    # "video" is served inline (to play alongside the skeleton); the others download
     filename = f"{job_id}{path.suffix}" if name == "video" else f"{job_id}.{name}"
     return FileResponse(path, filename=filename, media_type=media)
 

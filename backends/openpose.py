@@ -11,7 +11,7 @@ from typing import Sequence
 
 import numpy as np
 
-from core.adapter import CAT_NAO_COMERCIAL, AdapterConfig, ConfigurableAdapter
+from core.adapter import CAT_NON_COMMERCIAL, AdapterConfig, ConfigurableAdapter
 from core.canonical import COCO17
 
 BODY_25 = [
@@ -45,7 +45,7 @@ def _cfg() -> AdapterConfig:
         temporal="frame",
         multi_person=True,
         license="NAO-COMERCIAL (academic/non-profit research only)",
-        license_category=CAT_NAO_COMERCIAL,
+        license_category=CAT_NON_COMMERCIAL,
         notes="BODY_25 -> COCO-17; Neck e MidHip nao existem no COCO-17 (MidHip util como root). "
               "Fixar --keypoint_scale 0 (pixel). Score c==0 => ausente.",
     )
