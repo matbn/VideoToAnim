@@ -77,11 +77,84 @@ quaternion (that is what the clip stores). An unknown `space` returns `400`.
 
 Exports the **current clip** (with the edits) as GLB — this is what feeds the editor's preview.
 
+### `GET /api/refine/animation/{job_id}/curves?bone={bone}&space={local|global}`
+
+The bone's rotation **curve**, frame by frame — what the curve editor draws.
+
+```json
+{"job_id": "d59925e9a2a3", "bone": "Head", "space": "local", "fps": 30.0, "num_frames": 60,
+ "channels": {"x": [0.0, "..."], "y": [12.5, "..."], "z": [0.0, "..."]},
+ "quats": [[0.0, 0.0, 0.0, 1.0], "..."],
+ "base_quats": [[0.0, 0.0, 0.0, 1.0], "..."],
+ "chain": [{"bone": "Neck", "quats": [[0.0, "..."], "..."]}, "..."],
+ "keyframes": [{"index": 0, "frame": 30, "start": 11, "end": 49,
+                "value": [0.0, 40.0, 0.0], "interp": "smooth", "space": "local", "note": ""}]}
+```
+
+* `channels` — the Euler angles (degrees) of the bone per frame, **in the requested reference frame**
+  (the same meaning as `space` on the frame endpoint above).
+* `quats` — the local quaternion per frame (what the clip stores).
+* `base_quats` — the bone's series **without keyframes**: the base the keyframes are applied on top
+  of. It is `null` while the bone has no keyframes. A client that re-applies the keyframes itself
+  (to preview a drag) must start from this series, not from `quats` — otherwise deleting a
+  keyframe would leave the old rebake behind.
+* `chain` — the ancestors of the bone, root first, with their quaternions per frame: what a client
+  needs to convert a keyframe target to the world frame.
+* `keyframes` — the bone's keyframes (its edits in the history), with the value **in the requested
+  reference frame**, the rebake window (`start`/`end`) and the interpolation mode.
+
+`404` if the bone has no animated rotation. `400` for an unknown `space`.
+
+### `PUT /api/refine/animation/{job_id}/keyframes`
+
+Replaces the bone's **whole keyframe set** — what the curve editor commits.
+
+```json
+{"bone": "Head", "space": "local", "half": 20,
+ "keyframes": [{"frame": 12, "rotation_euler_deg": [0, 35, 0],
+                "interp_in": "smooth", "interp_out": "linear",
+                "handle_in": null, "handle_out": null, "handle_channel": 1}]}
+```
+
+* `half` — half the width (in frames) of the rebake window of a keyframe with no neighbours
+  (default 20, i.e. ~0.7 s of ramp on each side).
+* `interp_in` — how the curve **arrives** at the keyframe; `interp_out` — how it **leaves** it.
+  Both are `smooth` (ease-in-out, the default), `linear`, `step` (hold), `bezier`, or one of the
+  classic easing families: `sine`, `quad`, `cubic`, `quart`, `quint`, `expo`, `circ`, `back`,
+  `elastic`, `bounce`. Each family has an entry variant (the curve accelerates towards the
+  keyframe) and an exit variant (it eases off leaving it) — that is the pair the two options pick.
+  The segment between two keyframes follows the **exit** of the keyframe it leaves on its first
+  half and the **entry** of the keyframe it reaches on its second half; with both equal, the
+  segment uses that mode all the way. (`interp` alone is accepted as an alias of `interp_in`.)
+* `handle_in` / `handle_out` — the **bezier handles** of the keyframe: `[dx, dy]`, with `dx` in
+  frames and `dy` in degrees of the channel `handle_channel` (0=X, 1=Y, 2=Z). `null` = the
+  automatic handle (a third of the segment, on the line between the keyframes). The handle of the
+  *previous* keyframe shapes the segment that comes into this one, which is why the server
+  resolves the whole set at once.
+* The window of each keyframe is derived from its **neighbours**: from the frame after the previous
+  keyframe to the frame before the next one, so the ends of the window are the neighbours — which
+  become the anchors of the rebake. The result therefore does not depend on the order the
+  keyframes were created in.
+* `start` / `end` — the **effect range** of the keyframe (the frames it rewrites), dragged on the
+  timeline. `null` (the default) keeps the neighbour-derived window; when given, the keyframe acts
+  only on that stretch and the rest of the clip stays bit-exactly as it was. The keyframe's frame
+  must be inside the range.
+* The bone is rebuilt from the **base** (its series without keyframes) plus the new set, so
+  **deleting** a keyframe brings the bone back to where it was, instead of leaving the old rebake
+  in the clip.
+
+Response: `{"report": {"bone": "Head", "keyframes": 2, "frames_rewritten": 58, "affected": [0, 49]},
+"history_len": 2, "keyframes": [ ... ]}` (the keyframes as the server stored them).
+
+`400` for: a frame outside the clip, a keyframe without a 3-value target, two keyframes on the same
+frame, an unknown `space` or an unknown `interp`, a malformed handle. `404` if the bone has no
+animated rotation.
+
 ### `POST /api/refine/animation/{job_id}/edit`
 
 ```json
 {"bone": "Head", "frame": 30, "rotation_euler_deg": [0, 40, 0], "space": "local",
- "start": 20, "end": 45, "author": "editor", "note": "turn head"}
+ "start": 20, "end": 45, "interp": "smooth", "author": "editor", "note": "turn head"}
 ```
 
 Accepted fields for the target: `rotation_euler_deg` (3) or `rotation` (4, quaternion) or `translation`
@@ -101,7 +174,10 @@ Response:
 ```
 
 `400` for: frame outside the clip, invalid range, edited frame outside the range, nonexistent bone,
-end-cap bone, edit with no target, `translation` outside `Hips`.
+end-cap bone, edit with no target, `translation` outside `Hips`, unknown `space` or `interp`.
+
+`interp` chooses how the rebake blends: `smooth` (ease-in-out, the default and the historical
+behaviour), `linear` (a straight line) or `step` (holds the value until the target frame).
 
 ### `POST /api/refine/animation/{job_id}/undo` · `/redo` · `/reset`
 

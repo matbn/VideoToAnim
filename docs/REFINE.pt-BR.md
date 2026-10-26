@@ -119,6 +119,129 @@ o clipe é reconstruído do original + histórico salvo.
 
 ---
 
+## 3b. Editor de curvas (a timeline, como num DCC)
+
+O editor de bone é a visão *numérica* da mesma coisa; o editor de curvas é a *gráfica*.
+`http://127.0.0.1:8000/refine` → a **timeline atravessa o rodapé da página**, nas duas colunas, e é
+um widget só:
+
+```
+┌ barra ── osso │ eixos │ |◀ ◀ ▶ ▶ ▶| │ frame 87 · 2,90 / 8,00 s │ + key − key │ enquadrar │ tela cheia ┐
+├ régua ── frames  30 fps   0    20    40    60 …                                     │
+├ keyframes ── Head      ◆              ◆                                           │
+└ curvas ──  X  ────────╱╲──────╱╲────────  (X −3,3°  Y 35,0°  Z −29,2°)
+```
+
+* **clique numa curva** para inserir uma keyframe naquele frame (a curva não salta — a keyframe
+  passa a controlar a partir dali);
+* **arraste o losango** para mudar o valor (na vertical) ou para mover a keyframe no tempo
+  (na horizontal);
+* **arraste a régua** para scrubar; a **linha das keyframes** mostra as keyframes do osso (clique
+  numa para selecionar, clique na linha para inserir uma);
+* as **linhas X/Y/Z da esquerda** mostram o **ângulo de cada canal da keyframe selecionada**:
+  a letra liga e desliga a curva, o ângulo abre um **input** para digitar o valor exato, e o
+  **↺** devolve o canal ao valor **original**;
+* **clicar no losango** de uma keyframe abre esse mesmo input ali mesmo — arrastar continua
+  movendo o losango, clicar (sem arrastar) digita o valor;
+* a curva tracejada é a **original** (antes das keyframes), desenhada num **tom mais claro da
+  própria cor do canal** — perto o bastante para saber a que eixo pertence, longe o bastante
+  para não se confundir com a curva editável;
+* a **faixa** atrás da keyframe selecionada é a janela de rebake, e as marcas pequenas nas pontas
+  são as âncoras;
+* a curva mostrada é o **rebake de verdade**: o navegador reproduz a matemática do servidor (slerp +
+  a mesma suavização), então o que você arrasta é o que vai para o arquivo.
+
+### A prévia acompanha o arraste, em tempo real
+
+Enquanto uma keyframe é arrastada, a pose do osso **no frame atual** muda a cada pixel — e a
+prévia 3D mostra isso na hora, sem esperar o servidor: o navegador aplica a mesma matemática do
+rebake e escreve o quaternion direto na cena. O servidor só é chamado quando o mouse solta.
+
+### Curvas de interpolação (alças de bezier)
+
+Cada keyframe tem sua própria interpolação, e uma delas é uma **curva** de verdade: `bezier`. Nesse
+modo a keyframe ganha duas alças (as de entrada e de saída dos DCCs), desenhadas como uma linha
+tracejada a partir da keyframe, e **arrastar uma alça modela o segmento** — é assim que o valor sobe
+e desce entre duas keyframes.
+
+* as alcas são **automáticas** por padrão (um terço do segmento, sobre a reta entre as duas
+  keyframes — o "auto" do Blender): elas aparecem quando a keyframe passa para `bezier`;
+* a distância horizontal da alça é em **frames**, a vertical em **graus do canal** a que a alça
+  pertence (o canal é o da curva que você arrastou);
+* o navegador reproduz a bezier do servidor exatamente (a mesma cúbica, a mesma bisseção), então o
+  preview do arraste é o que vai para o arquivo.
+
+### Entrada e saída, separadas
+
+Toda keyframe tem **duas** opções de interpolação:
+
+| opção | o que ela modela |
+|---|---|
+| **entrada** (`interp_in`) | como a curva **chega** na keyframe |
+| **saída** (`interp_out`) | como a curva **sai** dela |
+
+O segmento entre duas keyframes segue a **saída** de quem deixa na primeira metade e a
+**entrada** de quem chega na segunda. Com as duas opções iguais, o segmento inteiro usa
+aquele modo (o comportamento de sempre); com opções diferentes, o segmento é dividido ao
+meio — é assim que se consegue "chega devagar, sai rápido" em uma única keyframe.
+
+### As famílias de easing
+
+Além de `suave` (ease-in-out), `linear`, `degrau` (hold) e `curva` (as alças da bezier), cada
+opção pode ser uma das famílias clássicas de easing:
+
+| família | o formato |
+|---|---|
+| `sine` | aceleração suave |
+| `quad` | quadrática |
+| `cubic` | cúbica |
+| `quart` | quártica |
+| `quint` | quíntica |
+| `expo` | exponencial (bem fechada) |
+| `circ` | circular |
+| `back` | passa do ponto e volta |
+| `elastic` | elástica |
+| `bounce` | quica |
+
+Cada família tem uma variante de **entrada** (a curva acelera até a keyframe) e uma de **saída**
+(ela freia saindo) — é esse o par que as duas opções escolhem. `back` e `elastic` passam do valor
+de propósito (o movimento vai além da keyframe e volta); `bounce` quebra a monotonicidade (o
+movimento quica).
+
+### O intervalo de efeito da keyframe (início e fim)
+
+Toda keyframe age num **intervalo de frames** — os que ela reescreve. Por padrão o intervalo sai
+das vizinhas (vai do frame seguinte à keyframe anterior até o frame anterior à seguinte), mas dá
+para escolher:
+
+* a **barra** embaixo da keyframe na timeline mostra o intervalo, e **as duas pontas se arrastam**;
+* os campos **início** / **fim** da keyframe selecionada mostram e mudam os mesmos números;
+* a faixa escurecida atrás da keyframe selecionada no gráfico é o mesmo intervalo.
+
+Uma keyframe com intervalo estreito só mexe o movimento dentro dele — o resto do clipe fica
+bit-exatamente como estava.
+
+### A janela vem das vizinhas
+
+Quando o intervalo **não** é escolhido, a janela vem das vizinhas: vai do frame **seguinte à
+keyframe anterior** até o frame **anterior à seguinte**, de modo que as pontas da janela são as
+vizinhas — que viram as âncoras do rebake. O resultado não depende, então, da ordem em que as
+keyframes foram criadas, e uma keyframe sem vizinhas ganha uma rampa de ±20 frames.
+
+### Interpolação por keyframe
+
+Cada keyframe tem **duas** opções de interpolação — **entrada** (como a curva chega nela) e
+**saída** (como ela sai) — e cada uma pode ser `suave` (ease-in-out, derivada zero nas pontas),
+`linear`, `degrau` (hold) ou `curva` (bezier, com as alças).
+
+### Apagar uma keyframe apaga mesmo
+
+O osso é reconstruído a partir da sua **base** (a série que ele tinha antes da primeira keyframe)
+mais o conjunto atual de keyframes. Sem a base, apagar uma keyframe deixaria o rebake antigo
+assado no clipe; com ela, o osso volta exatamente onde estava.
+
+---
+
 ## 4. Relatório comparativo
 
 Para cada filtro aplicado ao **mesmo clipe**, medimos:

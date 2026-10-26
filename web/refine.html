@@ -4,12 +4,12 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title data-i18n="ref.title">VideoToAnim · refinamento</title>
-<link rel="stylesheet" href="/static/style.css?v=7" />
+<link rel="stylesheet" href="/static/style.css?v=16" />
 <script type="importmap">
 {
   "imports": {
-    "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+    "three": "/static/vendor/three/build/three.module.js",
+    "three/addons/": "/static/vendor/three/examples/jsm/"
   }
 }
 </script>
@@ -47,30 +47,13 @@
       <div class="row"><span data-i18n="row.bones">ossos animados</span><b id="info-bones">—</b></div>
       <div class="row"><span data-i18n="row.session">sessão</span><b id="info-session">—</b></div>
     </div>
-
-    <h2 data-i18n="rsec.bone">2 · Editor de bone</h2>
-    <label class="field"><span data-i18n="form.bone">osso</span><select id="bone"></select></label>
-    <label class="field"><span><span data-i18n="form.frameTargetLabel">frame alvo:</span> <b id="frame-label">0</b></span>
-      <input type="range" id="frame" min="0" max="0" value="0" step="1" /></label>
-    <div class="grid2">
-      <label class="field"><span>rot X <b id="rx-label">0°</b></span><input type="range" id="rx" min="-180" max="180" value="0" step="1" /></label>
-      <label class="field"><span>rot Y <b id="ry-label">0°</b></span><input type="range" id="ry" min="-180" max="180" value="0" step="1" /></label>
-      <label class="field"><span>rot Z <b id="rz-label">0°</b></span><input type="range" id="rz" min="-180" max="180" value="0" step="1" /></label>
-      <label class="field"><span data-i18n="form.note">nota</span><input type="text" id="note" placeholder="ex.: virar a cabeça" data-i18n-placeholder="form.notePh" /></label>
-    </div>
-    <div class="grid2">
-      <label class="field"><span data-i18n="form.rangeStart">afetar do frame</span><input type="number" id="start" value="0" min="0" /></label>
-      <label class="field"><span data-i18n="form.rangeEnd">até o frame</span><input type="number" id="end" value="0" min="0" /></label>
-    </div>
-    <p class="hint" id="edit-hint" data-i18n="hint.rebake">o rebake interpola do último frame não afetado até o frame editado (e de volta).</p>
-    <button id="apply-edit" class="primary" data-i18n="btn.applyEdit">Aplicar edição</button>
     <div class="downloads" style="margin-top:10px">
       <button id="undo" class="ghost" data-i18n="btn.undo">↶ desfazer</button>
       <button id="redo" class="ghost" data-i18n="btn.redo">↷ refazer</button>
       <button id="reset" class="ghost" data-i18n="btn.clearEdits">limpar edições</button>
     </div>
 
-    <h2 data-i18n="rsec.filters">3 · Estabilização</h2>
+    <h2 data-i18n="rsec.filters">2 · Estabilização</h2>
     <div id="filters" class="checklist"></div>
     <div class="downloads">
       <label class="inline-chk" data-i18n-title="form.collisionTitle" title="detecta o tamanho dos ossos da malha antes de cada execução e desvia membros que invadem outros; desligue para comparar">
@@ -86,11 +69,14 @@
       <a id="dl-refined-fbx" class="ghost disabled" href="#" download data-i18n="btn.dlRefFbx">FBX refinado</a>
     </div>
 
-    <h2 data-i18n="rsec.constraints">4 · Constraints</h2>
+    <h2 data-i18n="rsec.constraints">3 · Constraints</h2>
     <p class="hint" data-i18n-html="hint.constraintsHtml">limites por junta (graus). <code>cone</code> limita o desvio total; <code>x/y/z</code> limitam um eixo, com min/max assimétricos. Salvo em <code>config/constraints_humanoid.yaml</code>.</p>
     <div id="limits" class="limits"></div>
     <button id="save-limits" class="primary" data-i18n="btn.saveLimits">Salvar limites</button>
     <p class="hint" id="limits-msg"></p>
+
+    <h2 data-i18n="rsec.log">Registro</h2>
+    <pre class="log" id="log" data-i18n="ref.logReady">pronto.</pre>
   </section>
       </div>
       <div class="col-preview">
@@ -134,7 +120,7 @@
         <div id="canvas-mesh" class="canvas-wrap"><div class="pane-empty" id="empty-mesh" data-i18n="ref.loadClip">carregue um clipe</div></div>
       </div>
     </div>
-      </section>
+  </section>
       </div>
     </div>
   </div>
@@ -202,16 +188,100 @@
     </div>
   </div>
 
-  <section class="panel shared-foot">
-    <div class="playbar">
-      <button id="playpause" class="primary small">▶︎</button>
-      <input type="range" id="timeline" min="0" max="1000" value="0" step="1" />
-      <span id="time" class="mono">0.00 / 0.00 s</span>
+  <section class="panel shared-foot timeline-panel" id="timeline-panel">
+    <div class="tl-toolbar">
+      <select id="curve-bone" aria-label="osso"></select>
+      <select id="space" aria-label="referencial">
+        <option value="local" data-i18n="form.spaceLocal">local (pai)</option>
+        <option value="global" data-i18n="form.spaceGlobal">global (mundo)</option>
+      </select>
+      <span class="tl-sep" aria-hidden="true"></span>
+      <button id="tl-first" class="ghost" title="primeiro frame">|◀</button>
+      <button id="tl-prevkey" class="ghost" title="keyframe anterior">◀</button>
+      <button id="playpause" class="primary small" title="tocar / pausar">▶</button>
+      <button id="tl-nextkey" class="ghost" title="próxima keyframe">▶</button>
+      <button id="tl-last" class="ghost" title="último frame">▶|</button>
+      <span class="tl-frame">
+        <input type="number" id="tl-frame" min="0" step="1" value="0" />
+        <b id="time" class="mono">0.00 / 0.00 s</b>
+      </span>
+      <span class="tl-sep" aria-hidden="true"></span>
+      <button id="curve-add" class="ghost" data-i18n="btn.addKey">+ key</button>
+      <button id="curve-del" class="ghost" data-i18n="btn.delKey">− key</button>
+      <button id="curve-fit" class="ghost" data-i18n="btn.fit">enquadrar</button>
     </div>
-    <p class="hint" id="preview-note" data-i18n="hint.previewNote">a prévia mostra o vídeo de referência e o clipe já com as suas edições.</p>
-    <pre class="log" id="log" data-i18n="ref.logReady">pronto.</pre>
+    <div class="tl-body">
+      <div class="curve-wrap" id="curve-wrap">
+        <canvas id="curve-canvas"></canvas>
+      </div>
+      <div class="curve-side">
+        <p class="hint" id="curve-sel-hint" data-i18n="hint.curveSel">nenhuma keyframe selecionada.</p>
+        <div class="grid2">
+          <label class="field"><span data-i18n="curve.keyFrame">frame</span>
+            <input type="number" id="curve-frame" min="0" step="1" /></label>
+          <label class="field"><span data-i18n="form.note">nota</span><input type="text" id="curve-note" /></label>
+        </div>
+        <div class="grid2">
+          <label class="field"><span data-i18n="curve.keyStart">início</span>
+            <input type="number" id="curve-start" min="0" step="1" /></label>
+          <label class="field"><span data-i18n="curve.keyEnd">fim</span>
+            <input type="number" id="curve-end" min="0" step="1" /></label>
+        </div>
+        <label class="field"><span data-i18n="form.interpIn">entrada</span>
+          <select id="curve-interp-in">
+            <option value="smooth" data-i18n="form.interpSmooth">suave</option>
+            <option value="linear" data-i18n="form.interpLinear">linear</option>
+            <option value="step" data-i18n="form.interpStep">degrau</option>
+            <option value="bezier" data-i18n="form.interpBezier">curva (bezier)</option>
+            <optgroup label="easings" class="curve-easings">
+              <option value="sine" data-i18n="form.interpSine">seno</option>
+              <option value="quad" data-i18n="form.interpQuad">quad</option>
+              <option value="cubic" data-i18n="form.interpCubic">cubic</option>
+              <option value="quart" data-i18n="form.interpQuart">quart</option>
+              <option value="quint" data-i18n="form.interpQuint">quint</option>
+              <option value="expo" data-i18n="form.interpExpo">expo</option>
+              <option value="circ" data-i18n="form.interpCirc">circ</option>
+              <option value="back" data-i18n="form.interpBack">back</option>
+              <option value="elastic" data-i18n="form.interpElastic">elastic</option>
+              <option value="bounce" data-i18n="form.interpBounce">bounce</option>
+            </optgroup>
+          </select></label>
+        <label class="field"><span data-i18n="form.interpOut">saída</span>
+          <select id="curve-interp-out">
+            <option value="smooth" data-i18n="form.interpSmooth">suave</option>
+            <option value="linear" data-i18n="form.interpLinear">linear</option>
+            <option value="step" data-i18n="form.interpStep">degrau</option>
+            <option value="bezier" data-i18n="form.interpBezier">curva (bezier)</option>
+            <optgroup label="easings" class="curve-easings">
+              <option value="sine" data-i18n="form.interpSine">seno</option>
+              <option value="quad" data-i18n="form.interpQuad">quad</option>
+              <option value="cubic" data-i18n="form.interpCubic">cubic</option>
+              <option value="quart" data-i18n="form.interpQuart">quart</option>
+              <option value="quint" data-i18n="form.interpQuint">quint</option>
+              <option value="expo" data-i18n="form.interpExpo">expo</option>
+              <option value="circ" data-i18n="form.interpCirc">circ</option>
+              <option value="back" data-i18n="form.interpBack">back</option>
+              <option value="elastic" data-i18n="form.interpElastic">elastic</option>
+              <option value="bounce" data-i18n="form.interpBounce">bounce</option>
+            </optgroup>
+          </select></label>
+        <div class="grid2">
+          <label class="field"><span>rot X</span><input type="number" id="curve-vx" step="0.5" /></label>
+          <label class="field"><span>rot Y</span><input type="number" id="curve-vy" step="0.5" /></label>
+        </div>
+        <div class="grid2">
+          <label class="field"><span>rot Z</span><input type="number" id="curve-vz" step="0.5" /></label>
+          <label class="field"><span data-i18n="curve.keyHandle">alças</span>
+            <span class="hint" id="curve-handle-hint">—</span></label>
+        </div>
+        <h2 data-i18n="curve.listTitle">keyframes do osso</h2>
+        <div id="curve-keys" class="curve-keys"></div>
+      </div>
+    </div>
+    <p class="hint" id="curve-hint" data-i18n="hint.curves">clique numa curva para inserir uma keyframe; arraste o losango para mudar o valor (ou o frame, arrastando na horizontal).</p>
+  </section>
   </section>
 </main>
-<script type="module" src="/static/refine.js?v=18"></script>
+<script type="module" src="/static/refine.js?v=29"></script>
 </body>
 </html>

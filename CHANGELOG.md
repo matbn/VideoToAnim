@@ -4,6 +4,174 @@
 
 Este documento também está disponível em português: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md).
 
+## [1.4.15] — Curve editor: the timeline became a graph
+
+Reported: *"I want to turn the refine page timeline into an animation timeline like the professional
+animation softwares, instead of slides: show animation curves with the possibility to visually add a
+keyframe and the curve shows the interpolation from the start frame until the target frame — which
+already happens with the sliders (but the sliders are not that useful)"*
+
+### Added
+
+* **The timeline became ONE thing**: the ruler, the keyframe row and the curves are in the same
+  canvas, in the footer of the page, across both columns — with the playhead running through all of
+  it, like in a DCC. The old footer frame slider (a 0-to-1000 bar) is gone.
+
+  * **Toolbar**: the bone, the reference frame (local/global), the playback controls (first frame,
+    previous keyframe, play, next keyframe, last frame), the **editable current frame** (the number
+    is typeable), the time, `+ key` / `− key` and fit. (The fullscreen button is gone: the timeline
+    already spans the whole footer.)
+
+  * The **ruler** shows the frames and the second marks; dragging it scrubs.
+
+  * The **keyframe row** shows the bone's keyframes: click one to select it, click the row to insert
+    one.
+
+  * The **X/Y/Z chips** (left) turn a channel's curve off; the chips on the right are the **value of
+    each channel at the current frame**. The **original** curve (before the keyframes) is drawn as
+    a dashed grey reference.
+
+* **The 3D preview follows the drag in real time.** Before, touching a keyframe only took effect
+  after the server answered (and the server re-exported the whole GLB). Now, while the diamond
+  moves, the pose of the bone at the current frame changes on every pixel and the preview shows it
+  at once: the browser applies the same rebake maths and writes the quaternion straight into the
+  scene. The server is only called when the mouse is released.
+
+  Verified in the browser (headless Chrome, with the mouse still down): the bone's quaternion in
+  the scene changed by **0.2983** during the drag, and the browser's preview value at frame 40
+  (**22.61°**) was exactly what the server stored afterwards (**22.6055°**).
+
+* **Interpolation curves**: the `curve (bezier)` mode gives each keyframe two **handles** (the DCC
+  ones), drawn as a dashed line from the keyframe. **Dragging a handle shapes the segment** between
+  two keyframes — that is how you pick the curve that fits the animation best.
+
+  * The handles start **automatic** (a third of the segment, on the line between the keyframes —
+    Blender's "auto") and appear when the keyframe switches to `bezier`.
+  * The handle's horizontal distance is in frames, the vertical one in degrees of the channel it
+    belongs to.
+  * The browser reproduces the server's bezier exactly (the same cubic, the same bisection): the
+    drag preview is what lands in the file — checked with the same case on both sides (maximum
+    error of **1.8e-14°**, now with a bezier keyframe and dragged handles in the test).
+
+* **The curve editor gained the classic easing families.** Besides `smooth` (ease-in-out),
+  `linear`, `step` (hold) and `curve` (the bezier handles), each option now takes the classic
+  easings: **sine, quad, cubic, quart, quint, expo, circ, back, elastic and bounce**.
+
+  * Each family has an **entry** variant (the curve accelerates towards the keyframe) and an
+    **exit** variant (it eases off leaving it) — that is the pair the two options pick.
+  * `back` and `elastic` **overshoot** on purpose (the motion goes past the keyframe and returns)
+    and `bounce` **bounces** (it breaks the monotonicity).
+  * The browser and the server share the same catalogue: the test that compares both sides now
+    runs the ten families and still matches at **1.8e-14°**.
+
+* **Fixed: the easing options vanished from the menu.** `applyStatic` swaps the `<optgroup>`'s
+  `textContent` to translate its label — and that **deletes the options inside it**. The group
+  label is now written by the app (`applyStatic` leaves it alone).
+
+* **The value input opens on the diamond.** Clicking (and releasing) a keyframe's diamond opens
+  the **number input** right there, with that channel's value — to type the exact number. Dragging
+  still moves the diamond (the click without a drag is what types).
+
+* **The angles on the left are the selected keyframe's.** The X/Y/Z rows in the graph's gutter show
+  each channel's angle **of the selected keyframe** (not of the current frame). The letter turns
+  the curve on and off, the angle opens the value input, and the **↺** next to it puts the channel
+  back to its **original** value.
+
+* **The original curve is now in the channel's colour.** It used to be grey on every axis; now each
+  channel draws its original in a **lighter shade of its own colour** — you can tell which axis it
+  belongs to without mistaking it for the editable curve.
+
+* **The curve is more customisable: entry and exit, separately.** Each keyframe now has **two**
+  interpolation options — **entry** (how the curve arrives at it) and **exit** (how it leaves). The
+  segment between two keyframes follows the exit of the keyframe it leaves on its first half and
+  the entry of the keyframe it reaches on the second: with both equal, the segment uses that mode
+  all the way (as before); with different options the segment is split in the middle — that is how
+  you get "arrives slowly, leaves quickly" on a single keyframe.
+
+  * `BoneEdit` gained `interp_out` (the exit) and `interp_prev` (the neighbour's exit, resolved by
+    the server); the old `interp` is still the entry (backwards compatible).
+  * The browser does the same maths — the test that compares both sides now covers a set with
+    **different** entry and exit and still matches at **1.8e-14°**.
+
+* **Every keyframe now has its own effect range (start and end), draggable on the timeline.**
+  That is what the request meant by "start and end" — not the whole clip, but the frames the
+  keyframe rewrites.
+
+  * The **bar** under the keyframe (in the keyframe row) shows the range, and **its two ends
+    drag**; the **start** / **end** fields of the selected keyframe show and change the same
+    numbers.
+  * With no range chosen, the window still comes from the neighbours (as before); once chosen, the
+    keyframe acts **only** on that stretch and the rest of the clip stays bit-exactly as it was.
+  * The server stores the choice (`range_explicit`) apart from the effective window, so the
+    automatic neighbour range never gets frozen.
+
+  Verified in the browser: the keyframe was born with the automatic range [20, 60]; dragging the
+  start end gave [6, 60] and dragging the other end [6, 69] — and the server stored both.
+
+* **The clip range is draggable on the timeline**: the two grips on the ruler mark the start and
+  the end. The part outside is shaded, the playback loops inside the range and **the export is
+  trimmed to it** (the session keeps the whole clip, so the editor still sees everything).
+
+  Verified in the browser: the start grip went from 0 to 18 and the end grip from 166 to 152, and
+  the server stored both; `Apply refine` exported a 10-frame clip (the 5–14 range of the test).
+
+* **The curve editor replaces the rotation sliders**: the bone panel (the X/Y/Z sliders, the target
+  frame, the `from/to` window and the "apply edit" button) is gone; the graph edits the bone now.
+  The `Curves` tab that existed in the first version of this is also gone (it was a panel inside a
+  panel).
+
+  * **The bone's rotation is drawn channel by channel** (X, Y, Z) over the clip. The keyframe
+    properties (frame, interpolation, value, note) and the bone's keyframe list sit in a column
+    beside the graph.
+
+  * **Keyframes can be inserted in the graph**: a click on the curve creates the keyframe at that
+    frame (the curve does not jump — the keyframe starts controlling it from there) and dragging the
+    diamond changes the **value** (vertically) or moves the keyframe **in time** (horizontally). `K`
+    inserts at the current frame, `Delete` removes the selected one.
+
+  * **The curve drawn is the real rebake.** The browser reproduces the server's maths (slerp + the
+    same easing), so the drag preview is exactly what lands in the file — checked with the same case
+    on both sides: maximum error of **1.8e-14°**.
+
+  * **The keyframe window comes from its neighbours**, not from the user: it runs from the frame
+    after the previous keyframe to the frame before the next one, so the ends of the window are the
+    neighbours — which become the anchors of the rebake. The result therefore does not depend on the
+    order the keyframes were created in, and the window band (with its anchors) is highlighted in
+    the graph.
+
+  * **Each keyframe has its own interpolation**: `smooth` (ease-in-out), `linear` or `step` (hold).
+    `BoneEdit` gained the `interp` field (backwards compatible: what does not have it is `smooth`).
+
+  * **Deleting a keyframe really deletes it.** The bone is rebuilt from its **base** (the series it
+    had before the first keyframe) plus the current keyframe set. Without the base, deleting a
+    keyframe would leave the old rebake baked into the clip and the bone would never go back.
+
+* **The curve no longer invades the degree ruler**: the drawing is clipped to the graph area, so a
+  value outside the scale (the preview of a drag) no longer covers the labels on the left.
+
+* **The bone panel is gone** (the X/Y/Z sliders, the target frame, the `from/to` window and the
+  "apply edit" button): the curve editor does the whole job, and the left column is now just the
+  clip, the filters and the constraints. The current frame lives in the page state (the footer
+  timeline and the curve editor drive it), which also removed one HTTP request per frame during
+  playback.
+
+### New APIs
+
+* `GET /api/refine/animation/{job_id}/curves?bone=&space=` — the bone's curve frame by frame (the
+  angles in the requested reference frame, the quaternions, the **base** and the ancestor chain)
+  and the bone's keyframes.
+* `PUT /api/refine/animation/{job_id}/keyframes` — replaces the bone's keyframe set (what the curve
+  editor commits).
+
+### Fixed
+
+* The editor's tab labels were **leaking between languages**: Portuguese showed `Refine`/`Mix A/B`
+  (the English versions sat inside the pt dictionary) and English fell back to Portuguese. Both
+  lists now have the same 283 keys.
+
+* The curve editor's `setPointerCapture` could kill the drag (the browser refuses the capture in
+  some cases) — it is now failure-tolerant.
+
 ## [1.4.14] — Mix body parts between two jobs
 
 Reported: *"I ran two jobs and I think in one of them the arm tracks better than the other; I want the body from B and the arm from A"*

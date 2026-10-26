@@ -77,11 +77,81 @@ local (é o que o clipe guarda). `space` desconhecido devolve `400`.
 
 Exporta o **clipe atual** (com as edições) em GLB — é o que alimenta a prévia do editor.
 
+### `GET /api/refine/animation/{job_id}/curves?bone={osso}&space={local|global}`
+
+A **curva** de rotação do osso, frame a frame — é o que o editor de curvas desenha.
+
+```json
+{"job_id": "d59925e9a2a3", "bone": "Head", "space": "local", "fps": 30.0, "num_frames": 60,
+ "channels": {"x": [0.0, "..."], "y": [12.5, "..."], "z": [0.0, "..."]},
+ "quats": [[0.0, 0.0, 0.0, 1.0], "..."],
+ "base_quats": [[0.0, 0.0, 0.0, 1.0], "..."],
+ "chain": [{"bone": "Neck", "quats": [[0.0, "..."], "..."]}, "..."],
+ "keyframes": [{"index": 0, "frame": 30, "start": 11, "end": 49,
+                "value": [0.0, 40.0, 0.0], "interp": "smooth", "space": "local", "note": ""}]}
+```
+
+* `channels` — os ângulos Euler (graus) do osso em cada frame, **no referencial pedido** (o mesmo
+  significado de `space` no endpoint de frame acima).
+* `quats` — o quaternion local de cada frame (é o que o clipe guarda).
+* `base_quats` — a série do osso **sem keyframes**: a base sobre a qual as keyframes são aplicadas.
+  É `null` enquanto o osso não tiver keyframes. Um cliente que reaplica as keyframes sozinho (para
+  prever um arraste) tem de partir desta série, e não de `quats` — senão apagar uma keyframe
+  deixaria o rebake antigo pelo clipe.
+* `chain` — os ancestrais do osso, da raiz para baixo, com os quaternions por frame: o que um
+  cliente precisa para converter o alvo de uma keyframe para o referencial do mundo.
+* `keyframes` — as keyframes do osso (as edições dele no histórico), com o valor **no referencial
+  pedido**, a janela do rebake (`start`/`end`) e o modo de interpolação.
+
+`404` se o osso não tiver rotação animada. `400` para `space` desconhecido.
+
+### `PUT /api/refine/animation/{job_id}/keyframes`
+
+Substitui o **conjunto inteiro** de keyframes do osso — é o que o editor de curvas grava.
+
+```json
+{"bone": "Head", "space": "local", "half": 20,
+ "keyframes": [{"frame": 12, "rotation_euler_deg": [0, 35, 0],
+                "interp_in": "smooth", "interp_out": "linear",
+                "handle_in": null, "handle_out": null, "handle_channel": 1}]}
+```
+
+* `half` — metade da largura (em frames) da janela de rebake de uma keyframe sem vizinhas
+  (padrão 20, ou seja ~0,7 s de rampa de cada lado).
+* `interp_in` — como a curva **chega** na keyframe; `interp_out` — como ela **sai**. As duas são
+  `smooth` (ease-in-out, o padrão), `linear`, `step` (hold), `bezier`, ou uma das famílias
+  clássicas de easing: `sine`, `quad`, `cubic`, `quart`, `quint`, `expo`, `circ`, `back`,
+  `elastic`, `bounce`. Cada família tem uma variante de entrada (a curva acelera até a keyframe)
+  e uma de saída (ela freia saindo) — é o par que as duas opções escolhem. O segmento entre duas
+  keyframes segue a **saída** de quem deixa na primeira metade e a **entrada** de quem chega na
+  segunda; com as duas iguais, o segmento inteiro usa aquele modo. (`interp` sozinho é aceito como
+  apelido de `interp_in`.)
+* `handle_in` / `handle_out` — as **alças da bezier** da keyframe: `[dx, dy]`, com `dx` em frames e
+  `dy` em graus do canal `handle_channel` (0=X, 1=Y, 2=Z). `null` = alça automática (um terço do
+  segmento, sobre a reta entre as keyframes). A alça da keyframe **anterior** modela o segmento que
+  entra nesta — por isso o servidor resolve o conjunto inteiro de uma vez.
+* A janela de cada keyframe vem das **vizinhas**: do frame seguinte à keyframe anterior até o frame
+  anterior à seguinte, de modo que as pontas da janela são as vizinhas — que viram as âncoras do
+  rebake. O resultado não depende, então, da ordem em que as keyframes foram criadas.
+* `start` / `end` — o **intervalo de efeito** da keyframe (os frames que ela reescreve), arrastado
+  na timeline. `null` (o padrão) mantém a janela das vizinhas; quando informado, a keyframe age só
+  naquele trecho e o resto do clipe fica bit-exatamente como estava. O frame da keyframe precisa
+  estar dentro do intervalo.
+* O osso é reconstruído a partir da **base** (a série sem keyframes) mais o conjunto novo, e por
+  isso **apagar** uma keyframe devolve o osso ao ponto anterior, em vez de deixar o rebake antigo no
+  clipe.
+
+Resposta: `{"report": {"bone": "Head", "keyframes": 2, "frames_rewritten": 58, "affected": [0, 49]},
+"history_len": 2, "keyframes": [ ... ]}` (as keyframes como o servidor gravou).
+
+`400` para: frame fora do clipe, keyframe sem alvo de 3 valores, duas keyframes no mesmo frame,
+`space` ou `interp` desconhecidos, alça malformada. `404` se o osso não tiver rotação animada.
+
 ### `POST /api/refine/animation/{job_id}/edit`
 
 ```json
 {"bone": "Head", "frame": 30, "rotation_euler_deg": [0, 40, 0], "space": "local",
- "start": 20, "end": 45, "author": "editor", "note": "virar cabeca"}
+ "start": 20, "end": 45, "interp": "smooth", "author": "editor", "note": "virar cabeca"}
 ```
 
 Campos aceitos para o alvo: `rotation_euler_deg` (3) ou `rotation` (4, quaternion) ou `translation`
@@ -101,7 +171,11 @@ Resposta:
 ```
 
 `400` para: frame fora do clipe, intervalo inválido, frame editado fora do intervalo, osso
-inexistente, osso end-cap, edição sem alvo, `translation` fora do `Hips`, `space` inválido.
+inexistente, osso end-cap, edição sem alvo, `translation` fora do `Hips`, `space` ou `interp`
+desconhecidos.
+
+`interp` escolhe como o rebake mistura: `smooth` (ease-in-out, o padrão e o comportamento de
+antes), `linear` (uma reta) ou `step` (segura o valor até o frame alvo).
 
 ### `POST /api/refine/animation/{job_id}/undo` · `/redo` · `/reset`
 

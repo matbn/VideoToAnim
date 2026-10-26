@@ -4,6 +4,174 @@
 
 This document is also available in English: [CHANGELOG.md](CHANGELOG.md).
 
+## [1.4.15] — Editor de curvas: a timeline virou gráfico
+
+Reported: *"eu quero transformar a timeline da página de refino numa timeline de animação, como nos
+softwares de animação de verdade, em vez de sliders: mostrar as curvas de animação, poder adicionar
+uma keyframe visualmente e a curva mostrar a interpolação do frame inicial até o frame alvo — que é
+o que já acontece com os sliders (mas os sliders não são muito úteis)"*
+
+### Adicionado
+
+* **A timeline virou UMA coisa só**: a régua, a linha das keyframes e as curvas estão no mesmo
+  canvas, no rodapé da página, atravessando as duas colunas — com o playhead atravessando tudo, como
+  nos DCCs. O slider de frames do rodapé (que era uma barra de 0 a 1000) foi junto.
+
+  * **Barra de ferramentas**: o osso, o referencial (local/global), os controles de reprodução
+    (primeiro frame, keyframe anterior, tocar, próxima keyframe, último frame), o **frame atual
+    editável** (o número é digitável), o tempo, `+ key` / `− key` e enquadrar. (O botão de tela
+    cheia foi removido: a timeline já ocupa o rodapé inteiro.)
+
+  * **A régua** mostra os frames e as marcas de segundo; arrastar nela faz o scrub.
+
+  * **A linha das keyframes** mostra as keyframes do osso: clique numa para selecionar, clique na
+    linha para inserir uma.
+
+  * **Os chips X/Y/Z** (à esquerda) ligam e desligam a curva do canal; **os chips da direita** são
+    o valor de cada canal no frame atual. A curva **original** (antes das keyframes) aparece em
+    tracejado cinza, como referência.
+
+* **A prévia 3D acompanha o arraste em tempo real.** Antes, mexer numa keyframe só mexia depois
+  que o servidor respondia (e o servidor regrava o GLB inteiro). Agora, enquanto o losango se move,
+  a pose do osso no frame atual muda a cada pixel e a prévia mostra na hora: o navegador aplica a
+  mesma matemática do rebake e escreve o quaternion direto na cena. O servidor só é chamado no
+  fim do arraste.
+
+  Verificado no navegador (Chrome headless, com o mouse ainda pressionado): o quaternion do osso
+  na cena mudou **0,2983** durante o arraste, e o valor do preview do navegador no frame 40
+  (**22,61°**) foi exatamente o que o servidor gravou depois (**22,6055°**).
+
+* **As curvas de interpolação**: o modo `curva (bezier)` dá a cada keyframe duas **alças** (as
+  handles dos DCCs), desenhadas em tracejado a partir da keyframe. **Arrastar uma alça modela o
+  segmento** entre duas keyframes — é assim que se escolhe a curva que fica melhor para a animação.
+
+  * As alcas nascem **automáticas** (um terço do segmento, sobre a reta entre as keyframes — o
+    "auto" do Blender) e aparecem quando a keyframe passa para `bezier`.
+  * A distância horizontal da alça é em frames, a vertical em graus do canal a que ela pertence.
+  * O navegador reproduz a bezier do servidor exatamente (a mesma cúbica, a mesma bisseção): o
+    preview do arraste é o que vai para o arquivo — conferido com o mesmo caso nos dois lados
+    (erro máximo de **1,8e-14°**, agora com uma keyframe de bezier e alças arrastadas no teste).
+
+* **O input de valor abre no losango.** Clicar (e soltar) no losango de uma keyframe abre um
+  **input de número** ali mesmo, com o valor daquele canal — para digitar o número exato. Arrastar
+  continua movendo o losango (o clique sem arrastar é o que digita).
+
+* **Os ângulos da esquerda são os da keyframe selecionada.** As linhas X/Y/Z na calha do gráfico
+  mostram o ângulo de cada canal **da keyframe selecionada** (e não do frame atual). A letra
+  liga/desliga a curva, o ângulo abre o input do valor, e o **↺** ao lado devolve o canal ao
+  valor **original**.
+
+* **A curva original agora é da cor do canal.** Ela era cinza em todos os eixos; agora cada canal
+  desenha a sua original num **tom mais claro da própria cor** — dá para saber a que eixo ela
+  pertence sem confundir com a curva editável.
+
+* **Mais famílias de curva na entrada e na saída.** Além de `suave` (ease-in-out), `linear`,
+  `degrau` (hold) e `curva` (as alças da bezier), cada opção agora aceita as famílias clássicas
+  de easing: **sine, quad, cubic, quart, quint, expo, circ, back, elastic e bounce**.
+
+  * Cada família tem uma variante de **entrada** (a curva acelera até a keyframe) e uma de
+    **saída** (ela freia saindo) — é o par que as duas opções escolhem.
+  * `back` e `elastic` **passam do valor** de propósito (o movimento vai além da keyframe e volta)
+    e o `bounce` **quica** (quebra a monotonicidade).
+  * O navegador e o servidor usam o mesmo catálogo: o teste que compara os dois lados agora roda
+    as dez famílias e continua batendo em **1,8e-14°**.
+
+* **Corrigido: as opções de easing sumiam do menu.** O `applyStatic` troca o `textContent` do
+  `<optgroup>` para traduzir o rótulo — e isso **apaga as opções que estão dentro dele**. O rótulo
+  do grupo agora é escrito pelo app (e o `applyStatic` não mexe mais nele).
+
+* **A curva ficou mais customizável: entrada e saída separadas.** Cada keyframe agora tem
+  **duas** opções de interpolação — **entrada** (como a curva chega nela) e **saída** (como ela
+  sai). O segmento entre duas keyframes segue a saída de quem deixa na primeira metade e a entrada
+  de quem chega na segunda: com as duas iguais, o segmento inteiro usa aquele modo (como antes); com
+  opções diferentes, o segmento é dividido ao meio — é assim que se consegue "chega devagar, sai
+  rápido" numa única keyframe.
+
+  * O `BoneEdit` ganhou `interp_out` (a saída) e `interp_prev` (a saída da vizinha, resolvida pelo
+    servidor); o `interp` de antes continua sendo a entrada (retrocompatível).
+  * O navegador faz a mesma conta — o teste que compara os dois lados agora cobre um conjunto com
+    entrada e saída **diferentes** e continua batendo em **1,8e-14°**.
+
+* **Cada keyframe tem o seu intervalo de efeito (início e fim), arrastável na timeline.**
+  Era o que o pedido queria dizer com "start and end" — não o clip inteiro, e sim os frames que
+  a keyframe reescreve.
+
+  * A **barra** embaixo da keyframe (na linha das keyframes) mostra o intervalo, e **as duas pontas
+    se arrastam**; os campos **início** / **fim** da keyframe selecionada mostram e mudam os
+    mesmos números.
+  * Sem intervalo escolhido, a janela continua saindo das vizinhas (como sempre); escolhido, a
+    keyframe age **só** naquele trecho e o resto do clipe fica bit-exatamente como estava.
+  * O servidor guarda a escolha (`range_explicit`) separada da janela efetiva, para não congelar o
+    intervalo automático das vizinhas.
+
+  Verificado no navegador: a keyframe nasceu com o intervalo automático [20, 60]; arrastando a
+  ponta do início ficou [6, 60] e arrastando a do fim, [6, 69] — e o servidor gravou as duas
+  escolhas.
+
+* **O intervalo do clipe é arrastável na timeline**: as duas alças da régua marcam o início e o
+  fim. O que fica fora fica escurecido, o playback roda dentro do intervalo e **o export é cortado
+  nele** (a sessão guarda o clipe inteiro, então o editor continua vendo tudo).
+
+  Verificado no navegador: a alça de início foi de 0 para 18 e a de fim de 166 para 152, e o
+  servidor gravou os dois valores; o `Aplicar refino` exportou um clipe de 10 frames (o intervalo
+  5–14 do teste).
+
+* **O editor de curvas substitui os sliders de rotação**: o painel de bone (os sliders de X/Y/Z, o
+  frame alvo, a janela `de/até` e o botão "aplicar edição") saiu; o gráfico é que edita o osso
+  agora. A aba `Curvas` que existiu na primeira versão disso também foi removida (era um panel
+  dentro do panel).
+
+  * **A rotação do osso é desenhada canal a canal** (X, Y, Z) ao longo do clipe. As propriedades da
+    keyframe (frame, interpolação, valor, nota) e a lista de keyframes do osso ficam numa coluna ao
+    lado do gráfico.
+
+  * **Dá para inserir a keyframe no gráfico**: um clique na curva cria a keyframe naquele frame (a
+    curva não salta: a keyframe passa a controlá-la a partir dali) e arrastar o losango muda o
+    **valor** (na vertical) ou move a keyframe **no tempo** (na horizontal). `K` insere no frame
+    atual, `Delete` apaga a selecionada.
+
+  * **A curva desenhada é o rebake de verdade.** O navegador reproduz a mesma matemática do
+    servidor (slerp + a mesma suavização), então o preview do arraste é exatamente o que vai para
+    o disco — conferido com o mesmo caso nos dois lados: erro máximo de **1,8e-14°**.
+
+  * **A janela da keyframe vem das vizinhas**, não do usuário: ela vai do frame seguinte à keyframe
+    anterior até o frame anterior à seguinte, de modo que as pontas da janela são as vizinhas —
+    que viram as âncoras do rebake. O resultado não depende da ordem em que as keyframes foram
+    criadas, e a faixa da janela (com as âncoras) aparece destacada no gráfico.
+
+  * **Cada keyframe tem sua interpolação**: `suave` (ease-in-out), `linear` ou `degrau` (hold). O
+    `BoneEdit` ganhou o campo `interp` (retrocompatível: o que não tem o campo é `suave`).
+
+  * **Apagar uma keyframe apaga mesmo.** O osso é reconstruído a partir da **base** (a série que ele
+    tinha antes da primeira keyframe) mais o conjunto atual de keyframes. Sem a base, apagar uma
+    keyframe deixaria o rebake antigo baked no clipe e o osso nunca voltaria ao estado anterior.
+
+* **A curva não invade mais a régua de graus**: o desenho é recortado na área do gráfico, então um
+  valor fora da escala (o preview de um arraste) não invade mais os rótulos do lado esquerdo.
+
+* **O painel de bone sumiu** (os sliders de X/Y/Z, o frame alvo, a janela `de/até` e o botão
+  "aplicar edição"): o editor de curvas faz o trabalho todo, e o painel da esquerda ficou só com o
+  clipe, os filtros e as constraints. O frame atual passou a morar no estado da página (a
+  timeline do rodapé e o editor de curvas mandam nele), o que também tirou um pedido HTTP por
+  frame durante o playback.
+
+### APIs novas
+
+* `GET /api/refine/animation/{job_id}/curves?bone=&space=` — a curva do osso frame a frame (os
+  ângulos no referencial pedido, os quaternions, a **base** e a cadeia de ancestrais) e as
+  keyframes do osso.
+* `PUT /api/refine/animation/{job_id}/keyframes` — substitui o conjunto de keyframes do osso
+  (é o que o editor de curvas grava).
+
+### Corrigido
+
+* Os rótulos das abas do editor estavam **vazando entre os idiomas**: o português mostrava
+  `Refine`/`Mix A/B` (as versões em inglês estavam dentro do dicionário pt) e o inglês caía no
+  português. As duas listas agora têm as mesmas 283 chaves.
+
+* O `setPointerCapture` do editor de curvas podia derrubar o arraste (o navegador recusa a
+  captura em alguns casos) — agora ele é tolerante a falha.
+
 ## [1.4.14] — Mistura de partes do corpo entre dois jobs
 
 Reported: *"eu rodei dois jobs e acho que em um deles o braço tem um tracking melhor que o do outro; quero

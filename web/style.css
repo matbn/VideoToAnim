@@ -1,4 +1,4 @@
-/* VideoToAnim — preset "Tecnologia suave e precisa" (17 Takram) */
+/*VideoToAnim — preset "Tecnologia suave e precisa" (17 Takram)*/
 
 :root {
   --bg: #f4f1ec;
@@ -72,12 +72,12 @@ input[type="file"], input[type="number"], select {
   transition: border-color .15s ease, background .15s ease;
 }
 
-/* O botao "Escolher arquivo" / "Choose File" e o "Nenhum arquivo escolhido"
+/*O botao "Escolher arquivo" / "Choose File" e o "Nenhum arquivo escolhido"
    SAO DO NAVEGADOR: eles seguem o idioma do navegador, nao o da pagina, e
    nao ha atributo que os traduza. Escondemos o input nativo e desenhamos o
    proprio botao, com o rotulo vindo do dicionario de i18n. O input continua
    no DOM (mesmo id, mesmo `.files`), so invisivel — o `<label>` abaixo
-   dispara o seletor normalmente. */
+   dispara o seletor normalmente.*/
 .file-pick { position: relative; }
 .file-pick input[type="file"] {
   position: absolute; inset: 0; width: 100%; height: 100%;
@@ -99,7 +99,7 @@ input[type="file"], input[type="number"], select {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--mono);
 }
-/* o foco do input invisivel precisa aparecer no botao desenhado */
+/*o foco do input invisivel precisa aparecer no botao desenhado*/
 .file-pick:focus-within .file-btn {
   border-color: var(--accent); background: #fff;
 }
@@ -149,7 +149,7 @@ button.small { width: auto; padding: 7px 14px; }
 .viewer-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .cameras { display: flex; gap: 8px; flex-wrap: wrap; }
 .cameras button { padding: 6px 12px; font-size: 12.5px; }
-/* divisor entre as opcoes de exibicao e as cameras */
+/*divisor entre as opcoes de exibicao e as cameras*/
 .cam-sep {
   width: 1px; align-self: stretch; margin: 2px 4px;
   background: var(--line);
@@ -209,7 +209,7 @@ button.small { width: auto; padding: 7px 14px; }
 .field.checkbox-line input { width: auto; margin-top: 3px; }
 .field.checkbox-line small { color: var(--ink-soft); }
 
-/* ---- constraints (limites articulares) ---------------------------------- */
+/*---- constraints (limites articulares) ----------------------------------*/
 .limits { margin-bottom: 12px; }
 .limits-bar { display: flex; gap: 8px; margin-bottom: 8px; }
 .limits-bar input[type="search"] {
@@ -293,7 +293,7 @@ button.small { width: auto; padding: 7px 14px; }
   background: var(--accent); opacity: .55;
 }
 
-/* ---- checklist de filtros ------------------------------------------------ */
+/*---- checklist de filtros ------------------------------------------------*/
 .checklist { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .chk {
   display: flex; gap: 9px; align-items: flex-start; padding: 7px 9px;
@@ -307,7 +307,7 @@ button.small { width: auto; padding: 7px 14px; }
 .chk small { color: var(--ink-soft); font-size: 11.5px; }
 .chk input:not(:checked) ~ span { opacity: .55; }
 
-/* ---- topo: seletor de idioma + sync rotation ----------------------------- */
+/*---- topo: seletor de idioma + sync rotation -----------------------------*/
 .topbar-right { display: flex; gap: 10px; align-items: center; }
 .lang-switch { display: flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--surface); }
 .lang-switch .lang-btn {
@@ -320,12 +320,12 @@ button.small { width: auto; padding: 7px 14px; }
 .inline-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); cursor: pointer; padding: 6px 4px; user-select: none; }
 .inline-chk input { accent-color: var(--accent); margin: 0; }
 
-/* ---- debug: overlay do esqueleto 2D sobre o vídeo ----------------------- */
+/*---- debug: 2D skeleton overlay on the video -----------------------*/
 .video-box { position: relative; }
 .video-box canvas.kp { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
-/* US-04: tabela do historico cabe em viewports estreitas (colunas fixas +
-   acoes empilhadas); tooltips completos ficam no title (US-06) */
+/*US-04: tabela do historico cabe em viewports estreitas (colunas fixas +
+   acoes empilhadas); tooltips completos ficam no title (US-06)*/
 @media (max-width: 640px) {
   .hist-table { table-layout: fixed; }
   .hist-table th:nth-child(1) { width: 64px; }
@@ -340,7 +340,7 @@ button.small { width: auto; padding: 7px 14px; }
   .hist-actions .ghost { padding: 1px 5px; font-size: 10px; }
 }
 
-/* ------------------------------------------- mistura de partes entre jobs */
+/*------------------------------------------- mistura de partes entre jobs*/
 .tr-parts { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; }
 .tr-parts .tr-part { padding: 4px 8px; border: 1px solid #ddd8cd; border-radius: 6px; cursor: pointer; }
 .tr-parts .tr-part:hover { background: #f3f0e9; }
@@ -351,7 +351,7 @@ button.small { width: auto; padding: 7px 14px; }
 .range2 { display: flex; gap: 6px; align-items: center; }
 .range2 input { width: 100%; }
 
-/* ------------------------------------------------------ abas do editor */
+/*------------------------------------------------------ abas do editor*/
 .refine-tabs { display: flex; gap: 6px; margin-bottom: 4px; }
 .refine-tabs .tab {
   padding: 7px 14px; font-size: 13px; border-radius: 8px; cursor: pointer;
@@ -363,7 +363,7 @@ button.small { width: auto; padding: 7px 14px; }
 .shared-foot { position: sticky; bottom: 0; }
 .shared-foot .playbar { margin-bottom: 8px; }
 
-/* ==================================================================
+/*==================================================================
    Editor: duas colunas. Os CONTROLES rolam na coluna da esquerda e a
    previa fica presa na direita, sempre visivel.
 
@@ -371,7 +371,7 @@ button.small { width: auto; padding: 7px 14px; }
    o estado, subir, mexer na adjuste, descer de novo para conferir...
    A coluna de controles tem scroll proprio, entao a previa nunca sai
    de vista.
-   ================================================================== */
+   ==================================================================*/
 .two-col {
   display: grid;
   grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
@@ -385,12 +385,12 @@ button.small { width: auto; padding: 7px 14px; }
   padding-right: 4px;
 }
 .col-preview { position: sticky; top: 8px; }
-/* a previa nunca deve ser menor que os controles, nem o contrario */
+/*a previa nunca deve ser menor que os controles, nem o contrario*/
 .col-preview > .panel, .col-controls > .panel { margin: 0; }
 
-/* os tres paineis da previa se ajustam a largura da coluna */
+/*os tres paineis da previa se ajustam a largura da coluna*/
 .two-col .split { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-.two-col .split .canvas-wrap { min-height: 240px; }
+.two-col .split .canvas-wrap { min-height: 150px; }
 .two-col .cmp-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .two-col .cmp-row .canvas-wrap { min-height: 280px; }
 
@@ -400,16 +400,97 @@ button.small { width: auto; padding: 7px 14px; }
   .col-preview { position: static; }
 }
 
-/* ------------------------------------------------- abas: misturas e timeline */
+/*------------------------------------------------- abas: misturas e timeline*/
 .cmp-pick { margin: 6px 0 8px; }
 .cmp-pick select { width: 100%; }
 .cmp-target { margin: 6px 0 8px; font-size: 12px; color: #6b665c; }
 .cmp-target b { color: #2b2a27; font-family: ui-monospace, Consolas, monospace; }
 
-/* arrastar a timeline durante a reproduicao nao pode ser atropelado pelo play */
+/*------------------------------------------- editor de curvas (graph editor)*/
+/*A TIMELINE do editor: barra de ferramentas, regua, linha das keyframes e
+   as curvas — tudo no mesmo canvas, com o mesmo playhead. Fica no rodape,
+   atravessando as duas colunas, como nos DCCs.*/
+.timeline-panel { display: flex; flex-direction: column; }
+.tl-toolbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--line);
+}
+.tl-toolbar select {
+  width: auto; max-width: 180px; padding: 5px 9px; font-size: 12.5px;
+}
+.tl-toolbar button { padding: 5px 10px; font-size: 12.5px; }
+.tl-toolbar button.primary.small { width: auto; margin: 0; padding: 5px 12px; }
+.tl-sep { width: 1px; align-self: stretch; margin: 0 4px; background: var(--line); }
+.tl-frame { display: flex; align-items: center; gap: 8px; margin-left: 2px; }
+.tl-frame input {
+  width: 62px; padding: 4px 7px; font-family: var(--mono); font-size: 12px;
+  text-align: right; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 8px; color: var(--ink);
+}
+.tl-frame input:focus { outline: none; border-color: var(--accent); background: #fff; }
+.tl-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
+.curve-wrap {
+  position: relative; flex: 1; min-width: 0; min-height: 150px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: #fdfcf9; overflow: hidden;
+}
+.curve-wrap canvas { display: block; width: 100%; height: 100%; }
+/*o input que aparece em cima do chip do canal (para digitar o valor exato)*/
+.curve-value-input {
+  position: absolute; z-index: 3; font-family: var(--mono); font-size: 11px;
+  padding: 2px 6px; border: 1px solid var(--accent); border-radius: 8px;
+  background: #fff; color: var(--ink); text-align: right;
+  box-shadow: var(--shadow-soft);
+}
+.curve-value-input:focus { outline: none; }
+/*a coluna da direita: canais, propriedades e a lista de keyframes*/
+.curve-side {
+  width: 262px; flex: none; overflow-y: auto; overscroll-behavior: contain;
+  padding-right: 4px;
+}
+.curve-side h2 { margin: 12px 0 6px; }
+.curve-side .field { margin-bottom: 8px; }
+.curve-side .field input, .curve-side .field select { padding: 5px 9px; font-size: 12.5px; }
+.curve-side .hint { margin: 0 0 6px; }
+
+/*canais: checkbox de visibilidade + rotulo + valor no frame atual*/
+.curve-channels { display: flex; flex-direction: column; gap: 3px; margin-bottom: 4px; }
+.curve-ch {
+  display: flex; align-items: center; gap: 8px; padding: 4px 7px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);
+  font-size: 12px; cursor: pointer; user-select: none;
+}
+.curve-ch:hover { background: #fff; }
+.curve-ch input { margin: 0; accent-color: var(--accent); }
+.curve-ch i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.curve-ch b { font-family: var(--mono); font-size: 11.5px; font-weight: 600; width: 12px; }
+.curve-ch span { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); }
+
+/*lista de keyframes do osso*/
+.curve-keys { display: flex; flex-direction: column; gap: 3px; }
+.curve-key-head {
+  display: grid; grid-template-columns: 44px 1fr 1fr 1fr 26px; gap: 6px;
+  padding: 0 7px; font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--ink-soft);
+}
+.curve-key-head span:not(:first-child) { text-align: right; }
+.curve-key {
+  display: grid; grid-template-columns: 44px 1fr 1fr 1fr 26px; gap: 6px;
+  align-items: center; padding: 5px 7px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--surface-2); cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.curve-key:hover { background: #fff; }
+.curve-key.sel { border-color: var(--accent); background: var(--accent-soft); }
+.curve-key b { font-family: var(--mono); font-size: 11.5px; font-weight: 500; }
+.curve-key span { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); text-align: right; }
+.curve-key button { padding: 1px 0; font-size: 12px; line-height: 1; border: 0; background: transparent; }
+.curve-key button:hover { color: var(--warn); box-shadow: none; }
+
+/*arrastar a timeline durante a reproduicao nao pode ser atropelado pelo play*/
 #timeline { cursor: pointer; }
 
-/* ==================================================================
+/*==================================================================
    Editor: trilhos explicitos de coluna.
 
    O `.layout` herdado do pipeline e uma grade de 2 colunas, e os
@@ -425,20 +506,20 @@ button.small { width: auto; padding: 7px 14px; }
 
    Os controles de cada aba ficam na coluna 1, ocupando a altura
    toda e rola por conta propria.
-   ================================================================== */
+   ==================================================================*/
 .layout-editor .refine-tabs {
   grid-column: 2;
   grid-row: 1;
   justify-self: center;
-  /* largura suficiente para as duas abas caberem numa linha so */
+  /*largura suficiente para as duas abas caberem numa linha so*/
   width: max-content;
   max-width: 100%;
   margin-bottom: 0;
 }
-/* "Mistura A/B" nao pode quebrar no meio do rotulo */
+/*"Mistura A/B" nao pode quebrar no meio do rotulo*/
 .layout-editor .refine-tabs .tab { white-space: nowrap; }
 
-/* A coluna de controls e alta (4 secoes) e, sozinha, esticava a linha
+/*A coluna de controls e alta (4 secoes) e, sozinha, esticava a linha
    do meio ate empurrar a timeline para fora da tela. A grade passa a
    ter altura DEFINIDA e a linha do meio e `1fr`: sobra o que a previa
    precisa, e a coluna de controls e limitada a essa altura e rola por
@@ -448,21 +529,21 @@ button.small { width: auto; padding: 7px 14px; }
    three.js medem o proprio tamanho no resize, e um `flex` os
    deformaria ate o proximo evento de resize. O `ResizeObserver` do
    `Viewer` (refine.js) e quem mantem o canvas em dia quando a caixa
-   muda por causa do layout. */
+   muda por causa do layout.*/
 .layout-editor {
-  /* A 1a coluna PRECISA ter a mesma largura da 1a coluna do .two-col
+  /*A 1a coluna PRECISA ter a mesma largura da 1a coluna do .two-col
      (440px). Com a do .layout herdado (380px) a coluna de controls
-     transbordava ~60px e cobria a timeline. */
+     transbordava ~60px e cobria a timeline.*/
   grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   height: calc(100vh - 118px);
-  /* O `.layout` herdado usa `align-items: start`, e essa e a raiz do
+  /*O `.layout` herdado usa `align-items: start`, e essa e a raiz do
      bug da timeline coberta: com `start` o `.tabpane` NAO estica ate
      o trilho da linha 2, ele fica com a altura do CONTEUDO. Como o
      `.col-controls` e limitado por `max-height: calc(100vh - 210px)`
      (em pixels de viewport), o painel crescia ~265px alem do trilho e
      passava por cima da timeline, que comeca logo abaixo. Aqui os
-     itens esticam e quem manda e a altura da linha. */
+     itens esticam e quem manda e a altura da linha.*/
   align-items: stretch;
   row-gap: 12px;
 }
@@ -474,19 +555,19 @@ button.small { width: auto; padding: 7px 14px; }
 }
 .layout-editor .tabpane > .two-col { height: 100%; min-height: 0; align-items: stretch; }
 .layout-editor .col-controls {
-  /* o teto herdado (`.col-controls { max-height: calc(100vh - 210px) }`)
+  /*o teto herdado (`.col-controls { max-height: calc(100vh - 210px) }`)
      e em pixels de viewport: numa janela baixa ele passa da altura da
      linha da grade e o painel transborda por cima da timeline. Dentro
-     do editor quem manda e a linha (`height: 100%` + `min-height: 0`). */
+     do editor quem manda e a linha (`height: 100%` + `min-height: 0`).*/
   height: 100%;
   min-height: 0;
   max-height: none;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-/* A previa e a unica coluna que NAO rola: ela preenche a linha e o
+/*A previa e a unica coluna que NAO rola: ela preenche a linha e o
    `ResizeObserver` do `Viewer` (refine.js) reajusta os canvas do
-   three.js, que medem a caixa no resize. */
+   three.js, que medem a caixa no resize.*/
 .layout-editor .col-preview {
   position: static;
   min-height: 0;
@@ -499,6 +580,16 @@ button.small { width: auto; padding: 7px 14px; }
   display: flex;
   flex-direction: column;
 }
+/*a previa (3D) fica com a coluna inteira: o editor de curvas desceu para
+   a timeline, no rodape*/
+.layout-editor .col-preview > .panel.viewer { flex: 1 1 0; }
+/*o cabecalho dos paineis da coluna da direita nao pode comer altura: o
+   editor de curvas precisa do espaco que sobra*/
+.layout-editor .col-preview .viewer-head h2 { margin: 0 0 6px; }
+.layout-editor .col-preview .viewer-head { align-items: flex-start; }
+/*footer log does not need 160px: control column and curve
+   take the space*/
+.layout-editor .shared-foot .log { max-height: 110px; }
 .layout-editor .col-preview .split,
 .layout-editor .col-preview .cmp-row {
   flex: 1;
@@ -509,7 +600,7 @@ button.small { width: auto; padding: 7px 14px; }
   flex-direction: column;
   min-height: 0;
 }
-/* a midia de cada painel cresce ate o espaco que sobrou na linha */
+/*a midia de cada painel cresce ate o espaco que sobrou na linha*/
 .layout-editor .col-preview .canvas-wrap,
 .layout-editor .col-preview .video-box {
   flex: 1;
@@ -521,20 +612,30 @@ button.small { width: auto; padding: 7px 14px; }
   min-height: 0;
 }
 .layout-editor .shared-foot {
-  /* a timeline fica na MESMA coluna da previa (2), e nao atravessando
-     a pagina: senao ela passava por cima da coluna de controls. */
+  /*a timeline fica na MESMA coluna da previa (2), e nao atravessando
+     a pagina: senao ela passava por cima da coluna de controls.*/
   grid-column: 2;
   grid-row: 3;
   margin-top: 0;
   align-self: start;
   position: static;
 }
+/*A timeline do editor (regua + keyframes + curvas) atravessa as DUAS
+   colunas, no rodape: e o relogio de verdade da pagina.
+   A altura e limitada (a coluna da esquerda tem conteudo que cresce): sem
+   isso a timeline tomava a tela inteira e a previa 3D ficava espremida.*/
+.layout-editor .shared-foot.timeline-panel {
+  grid-column: 1 / -1;
+  align-self: stretch;
+  height: min(330px, 42vh);
+}
+.layout-editor .shared-foot.timeline-panel .curve-wrap { min-height: 0; }
 
-/* --- cabecalhos A/B alinhados ---------------------------------------
+/*--- cabecalhos A/B alinhados ---------------------------------------
    A tem <select> (faixa alta) e B so uma linha de texto. Sem uma
    altura minima comum os dois canvas comecariam em linhas diferentes
    e a comparacao lado a lado ficaria torta. O `min-height` trava o
-   topo dos dois paineis no mesmo pixel. */
+   topo dos dois paineis no mesmo pixel.*/
 .two-col .cmp-head {
   display: flex;
   flex-direction: column;
@@ -542,11 +643,11 @@ button.small { width: auto; padding: 7px 14px; }
   min-height: 84px;
 }
 .two-col .cmp-head .pane-title { margin-bottom: 6px; }
-/* o <select> da origem nao deve esticar a faixa alem do necessario */
+/*o <select> da origem nao deve esticar a faixa alem do necessario*/
 .two-col .cmp-head .cmp-pick { margin-bottom: 0; }
 
 @media (max-width: 1180px) {
-  /* em coluna unica as abas e a timeline ocupam a largura toda */
+  /*em coluna unica as abas e a timeline ocupam a largura toda*/
   .layout-editor .refine-tabs,
   .layout-editor .shared-foot { grid-column: 1 / -1; }
   .layout-editor .refine-tabs { justify-self: stretch; }

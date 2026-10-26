@@ -118,6 +118,130 @@ the clip is rebuilt from the original + the saved history.
 
 ---
 
+## 3b. Curve editor (the timeline, like a DCC)
+
+The bone editor is a *numeric* view of the same thing; the curve editor is the *graphical* one.
+`http://127.0.0.1:8000/refine` → the **timeline spans the bottom of the page**, across both
+columns, and it is one single widget:
+
+```
+┌ toolbar ── bone │ axes │ |◀ ◀ ▶ ▶ ▶| │ frame 87 · 2.90 / 8.00 s │ + key − key │ fit │ fullscreen ┐
+├ ruler ── frames  30 fps   0    20    40    60 …                                       │
+├ keyframes ── Head      ◆              ◆                                             │
+└ curves ──  X  ────────╱╲──────╱╲────────  (X −3.3°  Y 35.0°  Z −29.2°)
+```
+
+* **click a curve** to insert a keyframe at that frame (the curve does not jump — the keyframe
+  starts controlling it from there);
+* **drag the diamond** to change the value (vertically) or to move the keyframe in time
+  (horizontally);
+* **drag the ruler** to scrub; the **keyframe row** shows the bone's keyframes (click one to select
+  it, click the row to insert one);
+* the **X/Y/Z rows on the left** show the **angle of each channel of the selected keyframe**:
+  the letter turns the curve on and off, the angle opens an **input** to type the exact value, and
+  the small **↺** puts the channel back to its **original** value;
+* **clicking the diamond** of a keyframe opens that same input right there — the drag still moves
+  the diamond, a click without a drag types the value;
+* the dashed curve is the **original** (before the keyframes), drawn in a **lighter shade of the
+  channel's own colour** — close enough to tell which axis it belongs to, different enough not to
+  be mistaken for the editable curve;
+* the **band** behind the selected keyframe is its rebake window, and the small marks at its ends
+  are the anchors;
+* the curve shown is the **real rebake**: the browser reproduces the server's maths (slerp +
+  the same easing), so what you drag is what lands in the file.
+
+### The preview follows the drag, in real time
+
+While a keyframe is being dragged, the pose of the bone **at the current frame** changes on every
+pixel — and the 3D preview shows it immediately, without waiting for the server: the browser
+applies the same rebake maths and writes the quaternion straight into the scene. The server is
+only called when the mouse is released.
+
+### Interpolation curves (bezier handles)
+
+Each keyframe has its own interpolation, and one of them is a real **curve**: `bezier`. In that mode
+the keyframe gets two handles (the in and out handles of the DCCs), drawn as a dashed line from the
+keyframe, and **dragging a handle shapes the segment** — the way the value rises and falls between
+two keyframes.
+
+* the handles are **automatic** by default (a third of the segment, on the line between the two
+  keyframes — the "auto" of Blender): they appear as soon as the keyframe switches to `bezier`;
+* the horizontal distance of the handle is in **frames**, the vertical one in **degrees of the
+  channel** the handle belongs to (the channel is the one whose curve you drag);
+* the browser reproduces the server's bezier exactly (same cubic, same bisection), so the preview
+  of the drag is what lands in the file.
+
+### Entry and exit, separately
+
+Every keyframe has **two** interpolation options:
+
+| option | what it models |
+|---|---|
+| **entrada** (`interp_in`) | how the curve **arrives** at the keyframe |
+| **saída** (`interp_out`) | how the curve **leaves** it |
+
+The segment between two keyframes follows the **exit** of the keyframe it leaves on its first half
+and the **entry** of the keyframe it reaches on its second half. With both options equal, the
+segment uses that mode all the way (the classic behaviour); with different options, the segment is
+split in the middle — that is how you get "arrives slowly, leaves quickly" on a single keyframe.
+
+### The easing families
+
+Besides `suave` (ease-in-out), `linear`, `degrau` (hold) and `curva` (the bezier handles), each
+option can be one of the classic easing families:
+
+| family | shape |
+|---|---|
+| `sine` | a gentle acceleration |
+| `quad` | quadratic |
+| `cubic` | cubic |
+| `quart` | quartic |
+| `quint` | quintic |
+| `expo` | exponential (very sharp) |
+| `circ` | circular |
+| `back` | overshoots and comes back |
+| `elastic` | springs |
+| `bounce` | bounces |
+
+Each family has an **entry** variant (the curve accelerates towards the keyframe) and an **exit**
+variant (it eases off leaving it) — that is the pair the two options pick. `back` and `elastic`
+overshoot the value on purpose (the motion goes past the keyframe and returns); `bounce` breaks the
+monotonicity (the motion bounces).
+
+### The effect range of a keyframe (start and end)
+
+Every keyframe acts on a **range of frames** — the ones it rewrites. By default the range is
+derived from the neighbours (it runs from just after the previous keyframe to just before the next
+one), but you can set it yourself:
+
+* the **bar** under the keyframe in the timeline shows the range, and **its two ends drag**;
+* the **início** / **fim** fields of the selected keyframe show and change the same numbers;
+* the shaded band behind the selected keyframe in the graph is the same range.
+
+A keyframe with a narrow range only bends the motion inside it — the rest of the clip is left
+bit-exactly as it was.
+
+### The window comes from the neighbours
+
+A keyframe does not carry its own range: its window runs from the frame **after the previous
+keyframe** to the frame **before the next one**, so the ends of the window are the neighbours —
+which become the anchors of the rebake. The result therefore does not depend on the order the
+keyframes were created in, and a keyframe with no neighbours gets a ±20 frame ramp (configurable
+per commit).
+
+### Interpolation per keyframe
+
+Each keyframe has its own interpolation: `smooth` (ease-in-out, zero derivative at the ends),
+`linear` or `step` (hold the value until the target frame).
+
+### Deleting a keyframe really deletes it
+
+The bone is rebuilt from its **base** (the series it had before the first keyframe) plus the
+current keyframe set. Without the base, deleting a keyframe would leave the old rebake baked into
+the clip; with it, the bone goes back exactly where it was.
+
+---
+
 ## 4. Comparison report
 
 For each filter applied to the **same clip**, we measure:

@@ -1,26 +1,27 @@
-// VideoToAnim — editor de refinamento (bone editor + filtros + constraints).
-// Modo Redesign/Refinement: mesma linguagem visual do pipeline, página nova.
+//VideoToAnim — refinement editor (bone editor + filters + constraints).
+//Redesign/Refinement mode: same visual language as the pipeline, new page.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { t, applyStatic, langSwitcher, getLang } from './i18n.js?v=5';
+import { t, applyStatic, langSwitcher, getLang } from './i18n.js?v=15';
+import { CurveEditor, CHANNELS, KEY_HALF } from './curves.js?v=11';
 
 const $ = (id) => document.getElementById(id);
 const CAMERAS = { persp: [2.2, 1.6, 2.6], front: [0, 1.1, 3.2], side: [3.4, 1.1, 0] };
-const PELVIS_Y = 0.98;   // altura pelvica de referencia (core/lifter.py)
-const SPINE_M = 0.52;    // comprimento da coluna usado pelo lifter
+const PELVIS_Y = 0.98;   //reference pelvic height (core/lifter.py)
+const SPINE_M = 0.52;    //length of spine used by the lifter
 
-// Enquadramento do 3D igual ao do video de referencia. Mesma geometria que o
-// lifter usou para liftar a pose, entao as fracoes de quadro batem exatamente.
-// Com a camera em (camX, camY, d) olhando para -Z, um ponto de mundo Y cai na
-// fracao de altura  f = 1/2 - (Y - camY) / (2 d tan(fov/2)):
-//   d    = SPINE_M / (2 * (tronco_px / altura_video) * tan(fov/2))
-//   camY = PELVIS_Y - d tan(fov/2) * (1 - 2 py_quadril / altura_video)
-// As fracoes batem exatamente (provado em tests/test_preview_sync.py).
+//3D framing the same as the reference video. Same geometry as the
+//lifter used to lift the pose, so the frame fractions match exactly.
+//With the camera at (camX, camY, d) looking at -Z, a world point Y falls into
+//height fraction f = 1/2 - (Y - camY) / (2 d tan(fov/2)):
+//d = SPINE_M / (2 * (stem_px / video_height) * tan(fov/2))
+//camY = PELVIS_Y - d tan(fov/2) * (1 - 2 py_hip / height_video)
+//The fractions match exactly (proven in tests/test_preview_sync.py).
 function videoCalibration() {
   if (!kpData || !kpData.frames || !kpData.frames[0] || !kpData.width || !kpData.height) return null;
   const f = kpData.frames[0];
-  if (!f[5] || !f[6] || !f[11] || !f[12]) return null;      // ombros/quadris
+  if (!f[5] || !f[6] || !f[11] || !f[12]) return null;      //shoulders/hips
   const mid = (a, b) => [(f[a][0] + f[b][0]) / 2, (f[a][1] + f[b][1]) / 2];
   const hip = mid(11, 12);
   const sho = mid(5, 6);
@@ -33,23 +34,29 @@ function cameraForVideo(camera) {
   const cal = videoCalibration();
   if (!cal) return null;
   const half = Math.tan((camera.fov * Math.PI / 180) / 2);
-  const fv = cal.torsoPx / cal.videoH;                    // tronco como fracao da altura
+  const fv = cal.torsoPx / cal.videoH;                    //trunk as a fraction of height
   const d = SPINE_M / (2 * Math.max(fv, 1e-3) * half);
   const camY = PELVIS_Y - d * half * (1 - 2 * cal.hipPy / cal.videoH);
-  // eixo X: o personagem pode estar fora do centro do quadro
-  const s = SPINE_M / Math.max(cal.torsoPx, 1e-3);         // m por px do video
-  const xWorld = (cal.hipPx - cal.videoW / 2) * s;         // onde o lifter botou o quadril
+  //X axis: the character may be off center of the frame
+  const s = SPINE_M / Math.max(cal.torsoPx, 1e-3);         //m per px of the video
+  const xWorld = (cal.hipPx - cal.videoW / 2) * s;         //where the lifter put the hip
   const camX = xWorld - (2 * (cal.hipPx / cal.videoW) - 1) * d * half * camera.aspect;
   return { x: camX, y: camY, z: d };
 }
 
 let jobId = null, clip = null, currentFrame = 0, playing = false, spanS = 0;
-let syncSeq = 0;   // guarda contra respostas de sync fora de ordem
 const viewers = [];
 let no3d = false;
 let activeCam = 'persp';
-// A preset "video" so pode ser calculada depois que o kp2d chega; reaplica a
-// camera ativa quando ele carrega (ou quando o painel muda de tamanho).
+//curve editor: clip pose drawn as rotation curves by
+//channel, with editable keyframes directly on the graph. It is BELOW the previous one,
+//in the refine editor (replaces sliders).
+let curveEditor = null;    //CurveEditor instance
+let curveBone = '';        //bone selected in the curve editor
+let curveData = null;      //last payload of /curves
+let curveSelectFrame = null;   //keyframe to select after reload
+//The "video" preset can only be calculated after kp2d arrives; reapply to
+//camera activates when it loads (or when the panel changes size).
 function reapplyCamera() { if (activeCam === 'video') viewers.forEach((v) => v.setCamera('video')); }
 
 function log(msg) {
@@ -57,7 +64,7 @@ function log(msg) {
   el.textContent = `${msg}\n` + el.textContent.split('\n').slice(0, 40).join('\n');
 }
 
-// ------------------------------------------------------------------ viewer
+//------------------------------------------------------------------ viewer
 class Viewer {
   constructor(host, empty, skeletonOnly = false) {
     this.host = host; this.empty = empty; this.skeletonOnly = skeletonOnly;
@@ -75,10 +82,10 @@ class Viewer {
     const k = new THREE.DirectionalLight(0xffffff, 1.4); k.position.set(3, 6, 4); this.scene.add(k);
     this.scene.add(new THREE.GridHelper(6, 24, 0xcfc9bd, 0xe4e0d7));
     this.resize();
-    // O painel 3D e flex (a linha da grade decide a altura), entao a caixa
-    // pode mudar SEM evento de `resize` da janela: trocar de aba, abrir o
-    // filtro de constraints, redimensionar a coluna. O three.js so mede
-    // quando alguem chama `resize()`, e o canvas ficava esticado.
+    //The 3D panel is flex (the grid line decides the height), so the box
+    //can change WITHOUT the window's `resize` event: change tabs, open the
+    //constraints filter, resize the column. three.js only measures
+    //when someone called `resize()`, the canvas was stretched.
     if (typeof ResizeObserver !== 'undefined') {
       this._ro = new ResizeObserver(() => this.resize());
       this._ro.observe(wrap);
@@ -87,8 +94,8 @@ class Viewer {
   }
   resize() {
     const host = $(this.host);
-    // enquanto oculto a caixa mede 0: `setSize(0, 0)` deixaria o renderer
-    // com aspect invalido, e nao ha o que corrigir ainda.
+    //while hidden the box measures 0: `setSize(0, 0)` would stop the renderer
+    //looks invalid, and there is nothing to fix yet.
     if (!host) return;
     const w = host.clientWidth, h = host.clientHeight;
     if (!w || !h) return;
@@ -97,14 +104,14 @@ class Viewer {
     this.camera.updateProjectionMatrix();
   }
   load(url) {
-    // descarrega o clipe anterior JA — o antigo nao pode ficar na cena
+    //download the previous clip JA — the old one cannot stay in the scene
     this.clear();
     const token = this._loadToken = (this._loadToken || 0) + 1;
     const empty = $(this.empty);
     if (empty) { empty.style.display = ''; empty.textContent = t('ref.loading'); }
     return new Promise((resolve) => {
       new GLTFLoader().load(url, (gltf) => {
-        if (token !== this._loadToken) { resolve(this); return; }   // trocou de clipe
+        if (token !== this._loadToken) { resolve(this); return; }   //changed clip
         this.model = gltf.scene;
         this.scene.add(this.model);
         this._criarLabels();
@@ -114,13 +121,13 @@ class Viewer {
           helper.material.color = new THREE.Color(0x4f6d5c);
           helper.material.depthTest = false;
           this.scene.add(helper);
-          this.helper = helper;                  // guardado: o clear() precisa remover
+          this.helper = helper;                  //saved: clear() needs to remove
         }
         if (gltf.animations && gltf.animations.length) {
           this.mixer = new THREE.AnimationMixer(this.model);
           const a = this.mixer.clipAction(gltf.animations[0]);
           this.clipDuration = a.getClip().duration;
-          a.paused = true;                       // scrub manual via setFrame
+          a.paused = true;                       //manual scrub via setFrame
           a.play();
           this.action = a;
         }
@@ -139,12 +146,12 @@ class Viewer {
   _criarLabels() {
     this.labelSprites = [];
     this._bonesByName = {};
-    const filtro = /(Index|Middle|Ring|Pinky|Thumb)\d$/;
+    const filter = /(Index|Middle|Ring|Pinky|Thumb)\d$/;
     const tirarPrefixo = (n) => n.replace(/^(?:mixamorig|mixamo)[:_]?/i, '');
     this.model.traverse((o) => {
       if (!o.isBone) return;
       this._bonesByName[tirarPrefixo(o.name)] = o;
-      if (!filtro.test(o.name)) {
+      if (!filter.test(o.name)) {
         const spr = makeTextSprite(tirarPrefixo(o.name));
         spr.position.set(0, 0.025, 0);
         spr.visible = !!this._labelsOn;
@@ -160,9 +167,9 @@ class Viewer {
     (this.labelSprites || []).forEach((s) => { s.visible = this._labelsOn; });
   }
   setFrame(t, fps) {
-    // scrub de acao PAUSADA: setTime() trava no instante 0 (timeScale efetivo = 0
-    // quando pausado — reproduzido com three.js 0.169). O caminho certo e
-    // action.time + mixer.update(0).
+    //action scrub PAUSED: setTime() hangs at time 0 (effective timeScale = 0
+    //when paused — played with three.js 0.169). The right way and
+    //action.time + mixer.update(0).
     if (!this.mixer || !this.action) return;
     const dur = Math.max(this.clipDuration, 1e-6);
     this.action.paused = true;
@@ -197,7 +204,7 @@ class Viewer {
   tick() { this.controls.update(); this.renderer.render(this.scene, this.camera); }
   setCamera(n) {
     const v = (n === 'video') ? cameraForVideo(this.camera) : null;
-    if (n === 'video' && !v) {                 // sem kp2d: cai na perspectiva
+    if (n === 'video' && !v) {                 //without kp2d: falls into perspective
       this.camera.position.set(...CAMERAS.persp);
       this.controls.target.set(0, 0.95, 0);
     } else if (v) {
@@ -211,7 +218,7 @@ class Viewer {
   }
 }
 
-// ------------------------------------------------------------------ estado
+//------------------------------------------------------------------ state
 async function api(path, opts) {
   const r = await fetch(path, opts);
   if (!r.ok) {
@@ -238,7 +245,7 @@ async function loadJobs() {
     return;
   }
   $('job-hint').textContent = t('ref.clipsAvailable', { n: done.length });
-  // prioridade: ?job= da URL -> job aberto na aba principal (aba padrao) -> mais recente
+  //priority: ?job= from URL -> job open in the main tab (default tab) -> most recent
   const want = new URLSearchParams(location.search).get('job');
   let preferido = null;
   try { preferido = localStorage.getItem('v2m:lastJob'); } catch (e) { /* sem storage */ }
@@ -255,7 +262,7 @@ async function selectJob(id) {
     clip = await api(`/api/refine/animation/${id}`);
   } catch (e) {
     clip = null;
-    viewers.forEach((v) => v.clear());           // o clipe antigo sai da cena
+    viewers.forEach((v) => v.clear());           //the old clip leaves the scene
     const vid = $('refvideo');
     if (vid) { vid.removeAttribute('src'); vid.load(); }
     const ov = $('video-empty');
@@ -283,67 +290,28 @@ async function selectJob(id) {
     $('video-empty').style.display = 'none';
   }
   loadKp();
-  const f = $('frame'), st = $('start'), en = $('end');
-  f.max = clip.num_frames - 1; f.value = 0; st.max = clip.num_frames - 1; en.max = clip.num_frames - 1;
-  // janela centrada no frame alvo, com rampa dos dois lados (ver syncRangeToFrame)
-  rangeWidth = DEFAULT_RANGE_W;
-  const w0 = Math.min(DEFAULT_RANGE_W, clip.num_frames - 1);
-  st.value = 0; en.value = String(w0);
-  const bs = $('bone');
-  bs.innerHTML = '';
-  for (const b of clip.animated_bones) {
-    const o = document.createElement('option');
-    o.value = b; o.textContent = b.replace('mixamorig:', '');
-    bs.appendChild(o);
-  }
+  currentFrame = 0;
+  fillBoneSelects();
   await refreshPreview();
   await syncSliders();
+  await loadCurves();
   refreshTransplantTarget();
   try { localStorage.setItem('v2m:lastJob', id); } catch (e) { /* sem storage */ }
-  history.replaceState(null, '', `/refine?job=${id}`);
+  //preserves the other URL parameters (the tab, for example)
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('job', id);
+    history.replaceState(null, '', u.toString());
+  } catch (e) { /* sem history: o job fica so na sessao */ }
   log(t('ref.clipLoadedLog', { id, n: clip.num_frames, b: clip.animated_bones.length }));
 }
 
-// A janela [start, end] tem de CONTER o frame alvo. Duas consequencias do
-// editor original nao fazer isso:
-//
-// 1. o padrao era [0, 10] e nunca acompanhava o frame — sair do frame 10
-//    fazia o servidor rejeitar a edicao inteira ("o frame editado (36) precisa
-//    estar dentro de [0, 10]"), sem nenhuma pista na interface de que o
-//    problema era a janela;
-// 2. mesmo quando dava certo, uma janela assimetrica espreme o rampa inteiro
-//    de um lado so: o smoothstep do rebake e suave nas pontas, mas se o lado
-//    curto tem de percorrer todo o angulo, o meio vira um chicote.
-//
-// Aqui a largura escolhida pelo usuario e preservada e a janela e recentrada no
-// frame, o que da o mesmo espaço de rampa antes e depois do alvo.
-// Medido no job 4ac4511714b6 (osso LeftArm, alvo no frame 36, -120 graus em Z):
-// o osso se move a 1,34 graus/frame na mediana, e o pico do rebake depende da
-// largura da janela -- 7,1x a taxa natural com 10 frames, 4,0x com 20, 2,2x com
-// 40. Abaixo de ~40 o "smoothstep" fica suave so nas pontas e o meio vira um
-// chicote. 40 frames = ~0,7 s de rampa para cada lado.
-const DEFAULT_RANGE_W = 40;
-let rangeWidth = DEFAULT_RANGE_W;
 
-function syncRangeToFrame(t) {
-  if (!clip) return;
-  const last = clip.num_frames - 1;
-  const st = Number($('start').value);
-  const en = Number($('end').value);
-  const w = en - st;
-  if (w > 0) rangeWidth = w;         // largura vale enquanto couber o frame
-  if (t >= st && t <= en) return;    // ja contem o alvo: nao mexe
-  let ns = Math.round(t - rangeWidth / 2);
-  ns = Math.max(0, Math.min(ns, last - rangeWidth));
-  $('start').value = String(ns);
-  $('end').value = String(Math.min(last, ns + rangeWidth));
-}
-
-// ------------------------------------------------------------------ abas
-// Duas abas no editor: o refino de verdade (osso, filtros, constraints) e a
-// mistura A/B. A barra de tempo e o log ficam FORA das abas, entao o playhead
-// e o video de referencia servem as duas — na aba da mistura os paineis A/B
-// acompanham o mesmo frame.
+//------------------------------------------------------------------ tabs
+//Two tabs in the editor: the real refinement (bone, filters, constraints) and the
+//A/B mix. The time bar and log are OUTSIDE the tabs, so the playhead
+//and the reference video serve both — in the mix tab, the A/B panels
+//accompany the same frame.
 function switchRefineTab(tab) {
   for (const b of document.querySelectorAll('.refine-tabs .tab')) {
     b.classList.toggle('active', b.dataset.tab === tab);
@@ -351,24 +319,40 @@ function switchRefineTab(tab) {
   const mr = $('pane-refine'), mm = $('pane-merge');
   if (mr) mr.hidden = tab !== 'refine';
   if (mm) mm.hidden = tab !== 'merge';
-  // o 3D precisa de resize ao voltar a ser visivel (o canvas media 0 quando oculto)
+  //the tab goes to the URL: a direct link to the mixing tab (and the way to
+  //send someone to the editor without explaining anything)
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('tab', tab);
+    history.replaceState(null, '', u.toString());
+  } catch (e) { /* sem history: a aba funciona igual */ }
+  //the 3D needs to be resized when it becomes visible again (the canvas averages 0 when hidden)
   requestAnimationFrame(() => {
     viewers.forEach((v) => v.resize());
     [cmpA, cmpB].forEach((v) => { if (v) v.resize(); });
     reapplyCamera();
     if (cmpA) syncCompareCamera(viewers[0], cmpA);
+    //the curves canvas also measures 0 while the flap is hidden
+    if (curveEditor) curveEditor.resize();
     drawKpOverlay();
   });
 }
 
-// ---------------------------------------------- mistura de partes entre jobs
-let trParts = [];      // [{id,label,bones}] vindas do servidor
-let cmpA = null;       // painel da origem
-let cmpB = null;       // painel do destino
-let cmpSourceJob = ''; // job carregado em cmpA
+//the tab requested in the URL (?tab=merge) — the tabs are "Refino" and "Mixture A/B"
+function tabFromUrl() {
+  const want = new URLSearchParams(location.search).get('tab');
+  const tabs = Array.from(document.querySelectorAll('.refine-tabs .tab')).map((b) => b.dataset.tab);
+  return (want && tabs.includes(want)) ? want : 'refine';
+}
 
-// Os dois paineis A/B dividem a camera com o preview principal, para dar para
-// comparar o mesmo membro girando a camera uma vez so.
+//---------------------------------------------- mix of parts between jobs
+let trParts = [];      //[{id,label,bones}] coming from the server
+let cmpA = null;       //source panel
+let cmpB = null;       //destination panel
+let cmpSourceJob = ''; //job loaded in cmpA
+
+//The two A/B panels divide the camera with the main preview, to give
+//compare the same member by rotating the camera just once.
 function syncCompareCamera(origem, destino) {
   if (!origem || !destino) return;
   destino.camera.position.copy(origem.camera.position);
@@ -377,7 +361,7 @@ function syncCompareCamera(origem, destino) {
 }
 
 function cmpFrames() {
-  const t = Number($('frame').value) || 0;
+  const t = currentFrame;
   const fps = (clip && clip.fps) || 30;
   if (cmpA) cmpA.setFrame(t, fps);
   if (cmpB) cmpB.setFrame(t, fps);
@@ -402,7 +386,7 @@ function syncRangeBounds() {
   const last = (clip ? clip.num_frames - 1 : 0);
   for (const id of ['tr-t0', 'tr-t1']) { const e = $(id); if (e) e.max = String(last); }
   for (const id of ['tr-s0', 'tr-s1']) { const e = $(id); if (e) e.max = String(last); }
-  const f = Number($('frame').value) || 0;
+  const f = currentFrame;
   if (!$('tr-usar-mapa').checked) {
     $('tr-s0').value = '0'; $('tr-s1').value = String(last);
     $('tr-t0').value = '0'; $('tr-t1').value = String(last);
@@ -504,78 +488,377 @@ async function undoTransplant() {
 
 function refreshTransplantTarget() {
   const el = $('tr-target');
-  // texto puro (o destino nao e editavel) — por isso textContent, nao value
+  //pure text (the destination is not editable) — that's why textContent, not value
   if (el) el.textContent = jobId || '—';
-  // carrega os dois paineis assim que ha um destino (e uma origem escolhida)
+  //loads both panels as soon as there is a destination (and an origin chosen)
   loadCompareClips(true);
 }
 
+//The current frame is the only source of truth (there is no longer a frame slider in
+//panel: the footer timeline and the curve editor rule it).
 async function syncSliders() {
   if (!jobId || !clip) return;
-  const t = Number($('frame').value);
-  currentFrame = t;
-  $('frame-label').textContent = t;
-  syncRangeToFrame(t);
-  // Video de referencia acompanha o frame (scrub e playback).
-  // O frame t da animacao corresponde ao frame t do VIDEO, e o frame t do video
-  // foi apresentado em t / vFps SEGUNDOS. A inversa de `animTimeFor` do app.js.
-  // A guarda e de MEIO frame: abaixo disso nao re-busca, acima disso o video
-  // ficaria ate meio frame atras do esqueleto.
+  const t = currentFrame;
+  //Reference video accompanies the frame (scrub and playback).
+  //The frame t of the animation corresponds to the frame t of the VIDEO, and the frame t of the video
+  //was presented in t/vFps SECONDS. The inverse of `animTimeFor` from app.js.
+  //The guard is HALF frame: below that there is no re-search, above that the video
+  //it would be up to half a frame behind the skeleton.
   const vid = $('refvideo');
   if (vid && clip.fps > 0 && vid.readyState >= 2) {
     const vFps = (kpData && kpData.fps) || clip.fps;
-    // frame t -> segundo t/vFps. (Um `t * vFps / clip.fps` aqui mandava o video
-    // para o segundo t: num clipe de 5,57 s ele chegava ao fim no frame 6.)
+    //frame t -> second t/vFps. (A `t * vFps / clip.fps` here would send the video
+    //for the second t: in a clip of 5.57 s it came to an end in frame 6.)
     const alvo = Math.min(t / vFps, Math.max(vid.duration - 0.001, 0));
     if (Math.abs(vid.currentTime - alvo) > 0.5 / vFps) vid.currentTime = alvo;
   }
-  // a pose na cena vem ANTES do fetch: o playback nao depende da rede
+  //the pose in the scene comes BEFORE the fetch: playback does not depend on the network
   viewers.forEach((v) => v.setFrame(t, clip.fps));
+  //the curve editor follows the same frame
+  if (curveEditor) curveEditor.setPlayhead(t);
   drawKpOverlay();
   $('time').textContent = `${(t / clip.fps).toFixed(2)} / ${(clip.num_frames / clip.fps).toFixed(2)} s`;
-  $('timeline').value = String(Math.round((t / Math.max(clip.num_frames - 1, 1)) * 1000));
-  const seq = ++syncSeq;
-  try {
-    const sp = editSpace();
-    cmpFrames();
-  const pose = await api(`/api/refine/animation/${jobId}/frame/${t}?space=${sp}`);
-    if (seq !== syncSeq) return;   // resposta antiga: outro sync ja foi disparado depois
-    const e = pose.bones[$('bone').value]?.euler_deg || [0, 0, 0];
-    // O preview 3D acima mostra a pose do clipe com a PRECISAO do dado. Se o
-    // slider guardasse o valor arredondado (37 de 37,4), o "aplicar" mandaria
-    // 37 e o frame alvo ficaria meio grau fora do que o usuario viu. Guardamos
-    // o valor exato — o `step` do range continua inteiro, entao o arredondamento
-    // continua valendo quando o usuario ARRASTA o slider de proposito.
-    const exatos = [e[0], e[1], e[2]];
-    for (const [id, val] of [['rx', exatos[0]], ['ry', exatos[1]], ['rz', exatos[2]]]) {
-      const el = $(id);
-      // `step=1` faz o navegador arredondar o `.value`; guardamos o valor
-      // cheio numa property e reaplicamos em `applyEdit`.
-      el._exact = val;
-      el.value = String(Math.round(val));
-    }
-    $('rx-label').textContent = `${Math.round(e[0])}°`;
-    $('ry-label').textContent = `${Math.round(e[1])}°`;
-    $('rz-label').textContent = `${Math.round(e[2])}°`;
-  } catch (e) { /* painel de euler mantem o valor anterior */ }
+  const tf = $('tl-frame');
+  if (tf && document.activeElement !== tf) tf.value = String(t);
+  cmpFrames();
 }
 
 async function refreshPreview() {
   if (!jobId) return;
   const url = `/api/refine/animation/${jobId}/glb?t=${Date.now()}`;
   await Promise.all(viewers.map((v) => v.load(url)));
-  await syncSliders();                            // reaplica o frame no modelo novo
+  await syncSliders();                            //reapply the frame to the new model
 }
 
 
-// --------------------------------------------- preview ao vivo das edicoes
+//------------------------------------------------------------------ curves
+//The reference (local/global) of the angles: the same for the curve editor and
+//for the rest of the page.
 function editSpace() {
   const v = $('space') ? $('space').value : 'local';
   return (v === 'global') ? 'global' : 'local';
 }
 
+async function undoRedo(kind) {
+  if (!jobId) return;
+  try {
+    const r = await api(`/api/refine/animation/${jobId}/${kind}`, { method: 'POST' });
+    log(t('ref.undoRedoLog', { kind, n: r.history_len }));
+    $('info-session').textContent = t('ref.editsCount', { n: r.history_len });
+    await refreshPreview();
+    await loadCurves();
+  } catch (e) { log(`${t('err.upper')}: ${e.message}`); }
+}
+
+async function resetEdits() {
+  if (!jobId) return;
+  await api(`/api/refine/animation/${jobId}/reset`, { method: 'POST' });
+  log(t('ref.clearedLog'));
+  $('info-session').textContent = t('ref.editsCount', { n: 0 });
+  await refreshPreview();
+  await loadCurves();
+}
+
+//------------------------------------------------------------------ curves
+//The curve editor shows the rotation of the bone channel by channel (X, Y, Z)
+//along the clip and lets you create, move and delete keyframes directly on the graph.
+//
+//The keyframes of this bone ARE the edits of history: what the graph
+//draws and rebakes for real (the same math as the server, core/refine/
+//boneedit.py) and what the drag predicts and what goes to disk.
+function curveChannelValues(frame) {
+  if (!curveData || !curveData.channels) return [0, 0, 0];
+  const n = curveData.num_frames || 1;
+  const f = Math.max(0, Math.min(n - 1, Math.round(frame)));
+  return CHANNELS.map((c) => (curveData.channels[c][f] ?? 0));
+}
+
+//the two bone selectors ("Refine" tab and "Curves" tab) are the same bone
+function fillBoneSelects() {
+  const bones = (clip && clip.animated_bones) || [];
+  const sel = $('curve-bone');
+  if (sel) {
+    sel.innerHTML = '';
+    for (const b of bones) {
+      const o = document.createElement('option');
+      o.value = b;
+      o.textContent = b.replace('mixamorig:', '');
+      sel.appendChild(o);
+    }
+  }
+  if (!curveBone || !bones.includes(curveBone)) curveBone = bones[0] || '';
+  if (sel && curveBone) sel.value = curveBone;
+  if (curveEditor) curveEditor.boneLabel = String(curveBone || '').replace('mixamorig:', '');
+}
+
+function setCurveBone(name) {
+  curveBone = name;
+  const cb = $('curve-bone');
+  if (cb) cb.value = name;
+  //the name of the bone appears in the timeline keyframes line
+  if (curveEditor) curveEditor.boneLabel = String(name || '').replace('mixamorig:', '');
+  loadCurves();
+}
+
+//the reference (local/global) of the curve editor angles
+function setEditSpace(space) {
+  const v = (space === 'global') ? 'global' : 'local';
+  const el = $('space');
+  if (el) el.value = v;
+  return v;
+}
+
+async function loadCurves() {
+  if (!curveEditor) return;
+  if (!jobId || !clip || !curveBone) {
+    curveData = null;
+    curveEditor.setData(null);
+      renderCurveKeys();
+    return;
+  }
+  try {
+    const d = await api(`/api/refine/animation/${jobId}/curves`
+      + `?bone=${encodeURIComponent(curveBone)}&space=${editSpace()}`);
+    curveData = d;
+    curveEditor.setData(d);
+    //the newly created keyframe (or the one that the user had selected) is
+    //checked: and what the properties panel shows
+    if (curveSelectFrame !== null) {
+      const i = curveEditor.keys.findIndex((k) => k.frame === curveSelectFrame);
+      if (i >= 0) { curveEditor.sel = i; curveEditor.draw(); }
+      curveSelectFrame = null;
+    }
+    curveEditor.setPlayhead(currentFrame);
+    renderCurveKeys();
+    syncCurveProps();
+  } catch (e) {
+    curveData = null;
+    curveEditor.setData(null);
+    log(`${t('err.upper')}: ${e.message}`);
+  }
+}
+
+//bone keyframe list
+function renderCurveKeys() {
+  const box = $('curve-keys');
+  if (!box) return;
+  box.innerHTML = '';
+  const keys = (curveEditor && curveEditor.keys) || [];
+  if (!keys.length) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = t('curve.noKeys');
+    box.appendChild(p);
+    return;
+  }
+  const head = document.createElement('div');
+  head.className = 'curve-key-head';
+  head.innerHTML = `<span>${t('curve.keyFrame')}</span><span>X</span><span>Y</span><span>Z</span><span></span>`;
+  box.appendChild(head);
+  keys.forEach((k, i) => {
+    const row = document.createElement('div');
+    row.className = 'curve-key' + (curveEditor && curveEditor.sel === i ? ' sel' : '');
+    row.innerHTML = `<b>${k.frame}</b>`
+      + `<span>${k.value[0].toFixed(1)}</span>`
+      + `<span>${k.value[1].toFixed(1)}</span>`
+      + `<span>${k.value[2].toFixed(1)}</span>`;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'ghost';
+    del.textContent = '×';
+    del.title = t('btn.delKey');
+    del.addEventListener('click', (ev) => { ev.stopPropagation(); deleteKeyframe(i); });
+    row.appendChild(del);
+    row.addEventListener('click', () => {
+      if (curveEditor) curveEditor.select(i);
+      goToFrame(k.frame);
+    });
+    box.appendChild(row);
+  });
+}
+
+//properties panel of the selected keyframe
+function syncCurveProps() {
+  const keys = (curveEditor && curveEditor.keys) || [];
+  const k = curveEditor && curveEditor.sel >= 0 ? keys[curveEditor.sel] : null;
+  const ids = ['curve-frame', 'curve-vx', 'curve-vy', 'curve-vz',
+               'curve-interp-in', 'curve-interp-out', 'curve-note',
+               'curve-start', 'curve-end'];
+  for (const id of ids) {
+    const el = $(id);
+    if (!el) continue;
+    el.disabled = !k;
+  }
+  if (!k) {
+    const hint = $('curve-sel-hint');
+    if (hint) hint.textContent = t('hint.curveSel');
+    const hh = $('curve-handle-hint');
+    if (hh) hh.textContent = '—';
+    return;
+  }
+  $('curve-frame').value = String(k.frame);
+  $('curve-vx').value = k.value[0].toFixed(2);
+  $('curve-vy').value = k.value[1].toFixed(2);
+  $('curve-vz').value = k.value[2].toFixed(2);
+  //the effect range: when the user did not move, the window comes from
+  //neighbors and fields show the effective range (gray, editable)
+  const wins = (curveEditor.windowsFor ? curveEditor.windowsFor() : null);
+  const win = wins ? wins[curveEditor.sel] : null;
+  $('curve-start').value = String(k.explicit && k.start !== null ? k.start : (win ? win[0] : k.frame));
+  $('curve-end').value = String(k.explicit && k.end !== null ? k.end : (win ? win[1] : k.frame));
+  $('curve-start').title = k.explicit ? '' : t('hint.curveRangeAuto');
+  $('curve-end').title = k.explicit ? '' : t('hint.curveRangeAuto');
+  $('curve-interp-in').value = k.interp_in || 'smooth';
+  $('curve-interp-out').value = k.interp_out || k.interp_in || 'smooth';
+  $('curve-note').value = k.note || '';
+  const hh = $('curve-handle-hint');
+  if (hh) {
+    hh.textContent = (k.interp_in === 'bezier' || k.interp_out === 'bezier')
+      ? t('hint.curveHandleOn') : t('hint.curveHandleOff');
+  }
+  const hint = $('curve-sel-hint');
+  if (hint) hint.textContent = t('hint.curveSelOn', { f: k.frame });
+}
+
+//writes the set of keyframes to the server
+async function commitCurves(keys) {
+  if (!jobId || !curveBone) return;
+  //the keyframe that was selected remains selected after reload
+  const sel = curveEditor ? curveEditor.sel : -1;
+  if (sel >= 0 && keys[sel]) curveSelectFrame = keys[sel].frame;
+  const body = {
+    bone: curveBone,
+    space: editSpace(),
+    half: KEY_HALF,
+    keyframes: keys.map((k) => ({
+      frame: k.frame,
+      rotation_euler_deg: k.value.map((v) => Number(Number(v).toFixed(4))),
+      //the entrance (how the curve arrives) and the exit (how it leaves)
+      interp_in: k.interp_in || 'smooth',
+      interp_out: k.interp_out || k.interp_in || 'smooth',
+      note: k.note || '',
+      //the bezier handles (null = automatic)
+      handle_in: k.handle_in ? k.handle_in.map((v) => Number(Number(v).toFixed(4))) : null,
+      handle_out: k.handle_out ? k.handle_out.map((v) => Number(Number(v).toFixed(4))) : null,
+      handle_channel: Number(k.handle_channel ?? 1),
+      //the keyframe effect range (null = the window leaves its neighbors)
+      start: (k.start === null || k.start === undefined) ? null : Number(k.start),
+      end: (k.end === null || k.end === undefined) ? null : Number(k.end),
+    })),
+  };
+  try {
+    const r = await api(`/api/refine/animation/${jobId}/keyframes`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    log(t('ref.keysApplied', {
+      bone: curveBone.replace('mixamorig:', ''), n: r.report.keyframes,
+    }));
+    $('info-session').textContent = t('ref.editsCount', { n: r.history_len });
+    await refreshPreview();     //the 3D clip already comes with the keyframes
+    await loadCurves();         //the server recalculates the windows
+  } catch (e) {
+    log(`${t('err.upper')}: ${e.message}`);
+    await loadCurves();
+    //the previous one may have remained in the drag pose: go back to the pose in the clip
+    syncSliders();
+  }
+}
+
+//enter the value of a channel (the channel chip on the graph)
+function setChannelValue(channel, value) {
+  if (!curveEditor || curveEditor.sel < 0 || !Number.isFinite(value)) return;
+  const keys = cloneKeys();
+  const k = keys[curveEditor.sel];
+  if (!k) return;
+  k.value = k.value.slice();
+  k.value[channel] = value;
+  commitCurves(keys);
+}
+
+//return a channel to the ORIGINAL value (the base curve, before the keyframes)
+function resetChannelValue(channel) {
+  if (!curveEditor || curveEditor.sel < 0) return;
+  const base = curveEditor.baseValueAt(curveEditor.keys[curveEditor.sel].frame, channel);
+  if (base === null || base === undefined) return;
+  setChannelValue(channel, base);
+}
+
+function cloneKeys() {
+  return ((curveEditor && curveEditor.keys) || []).map((k) => ({
+    frame: k.frame, value: k.value.slice(), note: k.note || '',
+    interp_in: k.interp_in, interp_out: k.interp_out,
+    handle_in: k.handle_in ? k.handle_in.slice() : null,
+    handle_out: k.handle_out ? k.handle_out.slice() : null,
+    handle_channel: k.handle_channel,
+    //the effect range chosen by the user (null = comes from the neighbors)
+    start: k.explicit ? k.start : null,
+    end: k.explicit ? k.end : null,
+  }));
+}
+
+//inserts a keyframe into the given frame (with the value of the curve in that frame: the
+//curve does not "jump", the keyframe starts to control from there)
+function insertKeyframe(frame) {
+  if (!curveEditor) return;
+  const total = (curveData && curveData.num_frames) || (clip && clip.num_frames) || 0;
+  const f = Math.max(0, Math.min(total - 1, Math.round(frame)));
+  const keys = cloneKeys();
+  const jaTem = keys.findIndex((k) => k.frame === f);
+  if (jaTem >= 0) {
+    curveEditor.select(jaTem);
+    goToFrame(f);
+    return;
+  }
+  const interpIn = ($('curve-interp-in') && $('curve-interp-in').value) || 'smooth';
+  const interpOut = ($('curve-interp-out') && $('curve-interp-out').value) || interpIn;
+  keys.push({
+    frame: f, value: curveChannelValues(f), note: '',
+    interp_in: interpIn, interp_out: interpOut,
+    handle_in: null, handle_out: null, handle_channel: 1,
+  });
+  keys.sort((a, b) => a.frame - b.frame);
+  curveSelectFrame = f;      //the new keyframe is selected
+  commitCurves(keys);
+}
+
+function deleteKeyframe(index) {
+  if (!curveEditor) return;
+  const keys = cloneKeys();
+  if (index < 0 || index >= keys.length) return;
+  keys.splice(index, 1);
+  if (curveEditor) curveEditor.sel = -1;
+  commitCurves(keys);
+}
+
+//takes the timeline (and preview) to a frame
+function goToFrame(frame) {
+  if (!clip) return;
+  const f = Math.max(0, Math.min(clip.num_frames - 1, Math.round(frame)));
+  currentFrame = f;
+  syncSliders();
+}
+
+//the bone keyframe closest to the frame (for the navigation buttons)
+function keyframeNear(frame, dir) {
+  const keys = (curveEditor && curveEditor.keys) || [];
+  if (!keys.length) return null;
+  const frames = keys.map((k) => k.frame).sort((a, b) => a - b);
+  if (dir < 0) {
+    const antes = frames.filter((f) => f < frame - 1e-6);
+    return antes.length ? antes[antes.length - 1] : null;
+  }
+  const depois = frames.filter((f) => f > frame + 1e-6);
+  return depois.length ? depois[0] : null;
+}
+
+//------------------------------------------- real-time preview of drag
+//When dragging a keyframe, the curve changes with each pixel: the pose of the
+//bone in the current frame changes along with it, and the 3D preview has to keep up — without
+//wait for the server. The account is the same as the server (the curve editor
+//reproduces the rebake), only here the quaternion goes straight to the bone of the
+//scene, as three.js guards.
 function eulerXYZDegToQuat(ex, ey, ez) {
-  // mesma ordem do servidor (euler_xyz_deg_to_quat): qx * qy * qz
+  //same server order (euler_xyz_deg_to_quat): qx * ​​qy * qz
   const x = THREE.MathUtils.degToRad(ex) / 2, y = THREE.MathUtils.degToRad(ey) / 2,
         z = THREE.MathUtils.degToRad(ez) / 2;
   const qx = new THREE.Quaternion(Math.sin(x), 0, 0, Math.cos(x));
@@ -584,9 +867,9 @@ function eulerXYZDegToQuat(ex, ey, ez) {
   return qx.multiply(qy).multiply(qz).normalize();
 }
 
-// Rotacao MUNDO do pai, percorrendo SO a hierarquia de ossos. Subir por
-// .parent pegaria o no/grupo da cena, que tem transformacao propria e
-// contaminaria a conta.
+//WORLD rotation of the father, traveling ONLY through the hierarchy of bones. Climb by
+//.parent would take the no/group of the scene, which has its own transformation and
+//would contaminate the account.
 function parentWorldQuat(viewer, nome) {
   const map = (clip && clip.bone_parents) || {};
   const q = new THREE.Quaternion();
@@ -600,85 +883,26 @@ function parentWorldQuat(viewer, nome) {
   return q;
 }
 
-function livePreview() {
-  if (!clip) return;
-  const nome = $('bone').value;
-  const space = editSpace();
-  viewers.forEach((v) => {
-    const b = v.getBone && v.getBone(nome);
-    if (!b) return;
-    const q = eulerXYZDegToQuat(Number($('rx').value), Number($('ry').value), Number($('rz').value));
-    // o three.js guarda o quaternion LOCAL do osso: em global e preciso
-    // tirar a rotacao do pai (mesma conta que o servidor faz no apply)
-    b.quaternion.copy(space === 'global'
-      ? parentWorldQuat(v, nome).invert().multiply(q)
-      : q);
-  });
+function previewPose(viewer, nome, eulerDeg, space) {
+  if (!viewer || !viewer.getBone) return;
+  const b = viewer.getBone(nome);
+  if (!b) return;
+  const q = eulerXYZDegToQuat(eulerDeg[0], eulerDeg[1], eulerDeg[2]);
+  //in `global` the angles describe the absolute orientation: the quaternion
+  //local and global taking the rotation of the parent (the same server account)
+  b.quaternion.copy(space === 'global'
+    ? parentWorldQuat(viewer, nome).invert().multiply(q)
+    : q);
 }
 
-// ------------------------------------------------------------------ edicao
-// O valor que o "aplicar" manda. O slider tem `step=1`, entao o navegador
-// arredonda `.value` para o grau mais proximo — mas a pose que o preview
-// mostrou e a do dado, com precisao. Se o usuario NAO arrastou o controle,
-// mandamos o valor cheio (`_exact`, posto por `syncSliders`); se arrastou,
-// o valor dele manda. Sem isto o frame alvo ficava ate meio grau fora do
-// que estava na tela.
-function eulerExato(id) {
-  const el = $(id);
-  const slider = Number(el.value);
-  const exato = el._exact;
-  // so usamos o valor cheio se ele ainda corresponde ao slider arredondado
-  // (isto e: o usuario nao mexeu). Depois de arrastar, os dois divergem.
-  if (typeof exato === 'number' && Math.round(exato) === slider) return exato;
-  return slider;
+function previewCurves(channels) {
+  if (!channels || !curveBone || !clip) return;
+  const f = Math.max(0, Math.min(clip.num_frames - 1, currentFrame));
+  const euler = CHANNELS.map((c) => channels[c][f]);
+  viewers.forEach((v) => previewPose(v, curveBone, euler, editSpace()));
 }
 
-async function applyEdit() {
-  if (!jobId) return;
-  const body = {
-    bone: $('bone').value,
-    frame: Number($('frame').value),
-    rotation_euler_deg: [eulerExato('rx'), eulerExato('ry'), eulerExato('rz')],
-    space: editSpace(),
-    start: Number($('start').value),
-    end: Number($('end').value),
-    author: 'editor',
-    note: $('note').value || '',
-  };
-  try {
-    const r = await api(`/api/refine/animation/${jobId}/edit`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    });
-    const rep = r.report;
-    log(t('ref.editApplied', {
-      bone: rep.bone.replace('mixamorig:', ''), f: rep.frame,
-      a: rep.affected[0], b: rep.affected[1], n: rep.frames_rewritten,
-      x: rep.anchors[0], y: rep.anchors[1],
-    }));
-    $('info-session').textContent = t('ref.editsCount', { n: r.history_len });
-    await refreshPreview();
-  } catch (e) { log(`${t('err.upper')}: ${e.message}`); }
-}
-
-async function undoRedo(kind) {
-  if (!jobId) return;
-  try {
-    const r = await api(`/api/refine/animation/${jobId}/${kind}`, { method: 'POST' });
-    log(t('ref.undoRedoLog', { kind, n: r.history_len }));
-    $('info-session').textContent = t('ref.editsCount', { n: r.history_len });
-    await refreshPreview();
-  } catch (e) { log(`${t('err.upper')}: ${e.message}`); }
-}
-
-async function resetEdits() {
-  if (!jobId) return;
-  await api(`/api/refine/animation/${jobId}/reset`, { method: 'POST' });
-  log(t('ref.clearedLog'));
-  $('info-session').textContent = t('ref.editsCount', { n: 0 });
-  await refreshPreview();
-}
-
-// ------------------------------------------------------------------ filtros
+//------------------------------------------------------------------ filters
 async function loadFilters() {
   const data = await api('/api/refine/filters');
   const box = $('filters');
@@ -734,7 +958,7 @@ async function applyRefine() {
       const c = r.constraints;
       log(t('ref.constraintsLog', { bones: c.bones_corrected, frames: c.frames_corrected_total }));
     }
-    if (r.collision) {   // US-07: resumo da anticolisao visivel no editor
+    if (r.collision) {   //US-07: anti-collision summary visible in the editor
       const k = r.collision;
       log(t('ref.collisionLog', { n: k.frames_corrected_total || 0,
         corrections: k.corrections_total || 0, max_deg: k.max_correction_deg || 0,
@@ -746,10 +970,10 @@ async function applyRefine() {
   } catch (e) { log(`${t('err.upper')}: ${e.message}`); }
 }
 
-// ------------------------------------------------------------------ limits
-// agrupamento por regiao do corpo (se o YAML ganhar juntas novas, "outras" cobre)
-const REGIOES = [
-  { id: 'cabeca', rotulo: 'Cabeça e pescoço', re: /^(Neck|Head)/ },
+//------------------------------------------------------------------ limits
+//grouping by body region (if YAML gains new joints, "other" covers it)
+const REGIONS = [
+  { id: 'cabeca', rotulo: 'Head and neck', re: /^(Neck|Head)/ },
   { id: 'tronco', rotulo: 'Tronco', re: /^(Spine|Hips|Pelvis)/ },
   { id: 'braco-e', rotulo: 'Braço esquerdo', re: /^Left(Shoulder|Arm|ForeArm|Hand$)/ },
   { id: 'braco-d', rotulo: 'Braço direito', re: /^Right(Shoulder|Arm|ForeArm|Hand$)/ },
@@ -759,17 +983,17 @@ const REGIOES = [
   { id: 'outros', rotulo: 'Outras juntas', re: /./ },
 ];
 
-function regiaoDe(nome) {
+function regionOf(nome) {
   const curto = String(nome || '').replace(/^mixamorig:/, '');
-  for (const r of REGIOES) if (r.re.test(curto)) return r;
-  return REGIOES[REGIOES.length - 1];
+  for (const r of REGIONS) if (r.re.test(curto)) return r;
+  return REGIONS[REGIONS.length - 1];
 }
 
-function semAcento(s) {
+function stripAccents(s) {
   return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
-let limitsOrig = [];       // referencia carregada/salva (para marcar pendencias)
+let limitsOrig = [];       //reference loaded/saved (to mark pending issues)
 let resumoLimits = '';
 
 function marcarPendentes() {
@@ -792,7 +1016,7 @@ function atualizarBarra(row) {
 }
 
 function filtrarLimits(q) {
-  const busca = semAcento(q).trim();
+  const busca = stripAccents(q).trim();
   let gruposVisiveis = 0;
   document.querySelectorAll('#limits .limit-group').forEach((g) => {
     let visiveis = 0;
@@ -820,7 +1044,7 @@ async function loadLimits() {
 
   const grupos = new Map();
   data.preset.limits.forEach((l, i) => {
-    const r = regiaoDe(l.bone);
+    const r = regionOf(l.bone);
     if (!grupos.has(r.id)) grupos.set(r.id, { regiao: r, itens: [] });
     grupos.get(r.id).itens.push({ l, i });
   });
@@ -861,7 +1085,7 @@ async function loadLimits() {
       row.className = 'limit-row';
       row.dataset.i = String(i);
       const nota = (getLang() === 'en') ? (l.note_en || l.note || '') : (l.note || l.note_en || '');
-      row.dataset.busca = semAcento(`${curto} ${l.kind} ${nota}`);
+      row.dataset.busca = stripAccents(`${curto} ${l.kind} ${nota}`);
       row.title = nota;
       row.innerHTML =
         `<span class="l-nome"><b>${curto}</b>`
@@ -921,7 +1145,7 @@ async function saveLimits() {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ preset }),
     });
-    // os valores salvos viram a nova referência (limpa o estado "pendente")
+    //the saved values ​​become the new reference (clears the "pending" state)
     limitsOrig = data.preset.limits.map((l) => ({ ...l }));
     document.querySelectorAll('#limits .limit-row').forEach((row) => row.classList.remove('dirty'));
     marcarPendentes();
@@ -932,7 +1156,7 @@ async function saveLimits() {
   }
 }
 
-// 3D indisponivel: degrada com mensagem e mantem o resto do editor vivo (US-01)
+//3D unavailable: degrades with message and keeps the rest of the editor alive (US-01)
 function showNo3D() {
   for (const id of ['empty-skel', 'empty-mesh']) {
     const el = $(id);
@@ -945,18 +1169,44 @@ function showNo3D() {
   }
 }
 
-// ------------------------------------------------------------------ wire
+//------------------------------------------------------------------ wire
 window.addEventListener('DOMContentLoaded', () => {
   try {
     viewers.push(new Viewer('canvas-skel', 'empty-skel', true));
     viewers.push(new Viewer('canvas-mesh', 'empty-mesh', false));
-    // paineis A/B da mistura: esqueleto dos dois jobs, camera e frame compartilhados
+    //A/B mix panels: skeleton of the two jobs, shared camera and frame
     cmpA = new Viewer('canvas-a', 'empty-a', true);
     cmpB = new Viewer('canvas-b', 'empty-b', true);
   } catch (err) {
-    console.error('falha ao iniciar o 3D (WebGL):', err);
+    console.error('failed to start 3D (WebGL):', err);
     viewers.length = 0;
     no3d = true;
+  }
+  //debug hook: the interface test reads the pose of the bone in the scene to
+  //check that the preview follows the drag in real time
+  window.__v2m_viewers = viewers;
+  //the curve editor: the canvas measures 0 while the tab is hidden, so
+  //ResizeObserver keeps the drawing up to date when it appears
+  const cc = $('curve-canvas');
+  if (cc) {
+    curveEditor = new CurveEditor(cc, {
+      onScrub: (f) => goToFrame(f),
+      onSelect: () => { renderCurveKeys(); syncCurveProps(); },
+      onInsert: (f) => insertKeyframe(f),
+      onCommit: (keys) => commitCurves(keys),
+      //3D preview follows the drag in real time
+      onPreview: (ch) => previewCurves(ch),
+      //the value of a channel (entered on the chip) and its reset
+      onSetValue: (ch, v) => setChannelValue(ch, v),
+      onResetValue: (ch) => resetChannelValue(ch),
+    });
+    //debug hook: and what the interface test uses to find the curve
+    //on the screen and check what the server recorded
+    window.__v2m_curveEditor = curveEditor;
+    if (typeof ResizeObserver !== 'undefined') {
+      const wrap = $('curve-wrap');
+      if (wrap) new ResizeObserver(() => curveEditor.resize()).observe(wrap);
+    }
   }
   const v0 = $('refvideo');
   if (v0) {
@@ -967,15 +1217,29 @@ window.addEventListener('DOMContentLoaded', () => {
       if (o) { o.style.display = ''; o.textContent = t('ref.loadFail'); }
     });
   }
-  $('playpause').textContent = '▶';   // estado inicial: pausado
+  $('playpause').textContent = '▶';   //initial state: paused
   applyStatic();
+  //the easing group label: `data-i18n` does not work here (the
+  //applyStatic changes the textContent of the optgroup and deletes the options inside)
+  document.querySelectorAll('optgroup.curve-easings').forEach((g) => {
+    g.label = t('form.interpGroup');
+  });
   langSwitcher('lang-switch');
   ligarSyncRot();
   if (no3d) showNo3D();
-  window.addEventListener('resize', () => { viewers.forEach((v) => v.resize()); [cmpA, cmpB].forEach((v) => { if (v) v.resize(); }); reapplyCamera(); syncCompareCamera(viewers[0], cmpA); drawKpOverlay(); });
+  window.addEventListener('resize', () => {
+    viewers.forEach((v) => v.resize());
+    [cmpA, cmpB].forEach((v) => { if (v) v.resize(); });
+    reapplyCamera();
+    syncCompareCamera(viewers[0], cmpA);
+    if (curveEditor) curveEditor.resize();
+    drawKpOverlay();
+  });
 
   document.querySelectorAll('.refine-tabs .tab').forEach((b) =>
     b.addEventListener('click', () => switchRefineTab(b.dataset.tab)));
+  //the tab can come in the URL (?tab=curves): the direct link to the curves editor
+  switchRefineTab(tabFromUrl());
   if ($('tr-apply')) $('tr-apply').addEventListener('click', applyTransplant);
   if ($('tr-undo')) $('tr-undo').addEventListener('click', undoTransplant);
   if ($('tr-source')) $('tr-source').addEventListener('change', () => loadCompareClips(true));
@@ -989,47 +1253,149 @@ window.addEventListener('DOMContentLoaded', () => {
   loadLimits();
 
   $('job').addEventListener('change', (e) => selectJob(e.target.value));
-  $('frame').addEventListener('input', syncSliders);
-  $('bone').addEventListener('change', syncSliders);
-  // a largura escolhida a mao e preservada quando a janela recentra no frame
-  ['start', 'end'].forEach((k) => $(k).addEventListener('input', () => {
-    const w = Number($('end').value) - Number($('start').value);
-    if (w > 0) rangeWidth = w;
-  }));
-  // trocar o referencial muda o significado dos angulos: recarrega o painel
-  // (e restaura a pose, senao a previa ficaria com o osso torto).
-  if ($('space')) $('space').addEventListener('change', () => {
+  if ($('curve-bone')) $('curve-bone').addEventListener('change', (e) => setCurveBone(e.target.value));
+  //the reference (local/global) changes the meaning of the angles: reloads
+  //the curves (and restores the pose, otherwise the previous one would have a crooked bone).
+  const sp = $('space');
+  if (sp) sp.addEventListener('change', () => {
     viewers.forEach((v) => v.setFrame(currentFrame, clip ? clip.fps : 30));
     syncSliders();
+    loadCurves();
   });
-  ['rx', 'ry', 'rz'].forEach((k) =>
-    $(k).addEventListener('input', () => {
-      // arrastou: o valor do slider passa a ser o do usuario e o `_exact`
-      // (do dado) deixa de valer — `eulerExato` volta a mandar o slider.
-      $(k)._exact = null;
-      $(`${k}-label`).textContent = `${$(k).value}°`;
-      livePreview();   // gira o osso selecionado na hora (sem gravar)
-    }));
-  $('apply-edit').addEventListener('click', applyEdit);
   $('undo').addEventListener('click', () => undoRedo('undo'));
   $('redo').addEventListener('click', () => undoRedo('redo'));
   $('reset').addEventListener('click', resetEdits);
   $('compare').addEventListener('click', compare);
   $('apply-refine').addEventListener('click', applyRefine);
   $('save-limits').addEventListener('click', saveLimits);
-  $('timeline').addEventListener('input', (e) => {
-    if (!clip) return;
-    const t = Math.round((Number(e.target.value) / 1000) * (clip.num_frames - 1));
-    $('frame').value = t;
-    syncSliders();
+
+  //---- curve editor ----------------------------------------------------
+  if ($('curve-add')) $('curve-add').addEventListener('click', () => insertKeyframe(currentFrame));
+  if ($('curve-del')) $('curve-del').addEventListener('click', () => {
+    deleteKeyframe(curveEditor ? curveEditor.sel : -1);
   });
+  if ($('curve-fit')) $('curve-fit').addEventListener('click', () => { if (curveEditor) curveEditor.fit(); });
+  //the timeline: navigation by frame and keyframe
+  if ($('tl-first')) $('tl-first').addEventListener('click', () => goToFrame(0));
+  if ($('tl-last')) $('tl-last').addEventListener('click', () => goToFrame((clip ? clip.num_frames : 1) - 1));
+  if ($('tl-prevkey')) $('tl-prevkey').addEventListener('click', () => {
+    const f = keyframeNear(currentFrame, -1);
+    if (f !== null) goToFrame(f);
+  });
+  if ($('tl-nextkey')) $('tl-nextkey').addEventListener('click', () => {
+    const f = keyframeNear(currentFrame, 1);
+    if (f !== null) goToFrame(f);
+  });
+  if ($('tl-frame')) $('tl-frame').addEventListener('change', (e) => {
+    goToFrame(Number(e.target.value) || 0);
+  });
+  //properties of the selected keyframe: moving a field saves the keyframe
+  const propFields = [
+    ['curve-frame', (k, v) => { k.frame = Math.max(0, Math.round(v)); }],
+    ['curve-vx', (k, v) => { k.value[0] = v; }],
+    ['curve-vy', (k, v) => { k.value[1] = v; }],
+    ['curve-vz', (k, v) => { k.value[2] = v; }],
+  ];
+  //the effect range: start/end (what the keyframe rewrites)
+  for (const [id, campo] of [['curve-start', 'start'], ['curve-end', 'end']]) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('change', () => {
+      if (!curveEditor || curveEditor.sel < 0) return;
+      const keys = cloneKeys();
+      const k = keys[curveEditor.sel];
+      if (!k) return;
+      const v = Number(el.value);
+      if (!Number.isFinite(v)) return;
+      //If the keyframe does not yet have a range chosen, start with
+      //effective range (what came out of the neighbors)
+      if (!k.explicit) {
+        const wins = curveEditor.windowsFor();
+        const win = wins[curveEditor.sel] || [k.frame, k.frame];
+        k.start = win[0];
+        k.end = win[1];
+      }
+      k[campo] = Math.max(0, Math.round(v));
+      k.explicit = true;
+      //the beginning cannot go beyond the end (and the frame has to stay inside)
+      if (k.start > k.end) {
+        const tmp = k.start; k.start = k.end; k.end = tmp;
+      }
+      k.start = Math.min(k.start, k.frame);
+      k.end = Math.max(k.end, k.frame);
+      commitCurves(keys);
+    });
+  }
+  for (const [id, set] of propFields) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('change', () => {
+      if (!curveEditor || curveEditor.sel < 0) return;
+      const keys = cloneKeys();
+      const k = keys[curveEditor.sel];
+      if (!k) return;
+      const v = Number(el.value);
+      if (!Number.isFinite(v)) return;
+      set(k, v);
+      keys.sort((a, b) => a.frame - b.frame);
+      commitCurves(keys);
+    });
+  }
+  //the entry and exit of the keyframe (how the curve arrives and how it leaves)
+  for (const [id, campo] of [['curve-interp-in', 'interp_in'],
+                             ['curve-interp-out', 'interp_out']]) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('change', () => {
+      if (!curveEditor || curveEditor.sel < 0) return;
+      const keys = cloneKeys();
+      const k = keys[curveEditor.sel];
+      if (!k) return;
+      k[campo] = el.value;
+      //turning to "curve" materializes the automatic handles: without them there is no
+      //nothing for the user to grab
+      if (el.value === 'bezier' && !k.handle_in && !k.handle_out) {
+        const auto = curveEditor.autoHandles(curveEditor.sel);
+        if (auto) {
+          k.handle_in = auto.handle_in;
+          k.handle_out = auto.handle_out;
+        }
+      }
+      commitCurves(keys);
+    });
+  }
+  if ($('curve-note')) $('curve-note').addEventListener('change', () => {
+    if (!curveEditor || curveEditor.sel < 0) return;
+    const keys = cloneKeys();
+    const k = keys[curveEditor.sel];
+    if (!k) return;
+    k.note = $('curve-note').value;
+    commitCurves(keys);
+  });
+  //curve editor shortcuts (like in DCCs)
+  document.addEventListener('keydown', (ev) => {
+    if (!curveEditor || !clip) return;
+    const tag = (ev.target && ev.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (ev.key === 'k' || ev.key === 'K') {
+      ev.preventDefault();
+      insertKeyframe(currentFrame);
+    } else if (ev.key === 'Delete' || ev.key === 'Backspace') {
+      if (curveEditor.sel >= 0) { ev.preventDefault(); deleteKeyframe(curveEditor.sel); }
+    }
+  });
+
   $('playpause').addEventListener('click', () => {
     playing = !playing;
-    $('playpause').textContent = playing ? '❚❚' : '▶︎';
+    $('playpause').textContent = playing ? '❚❚' : '▶';
     if (playing) step();
   });
   document.querySelectorAll('[data-cam]').forEach((b) =>
-    b.addEventListener('click', () => { activeCam = b.dataset.cam; viewers.forEach((v) => v.setCamera(activeCam)); [cmpA, cmpB].forEach((v) => { if (v) v.setCamera(activeCam); }); }));
+    b.addEventListener('click', () => {
+      activeCam = b.dataset.cam;
+      viewers.forEach((v) => v.setCamera(activeCam));
+      [cmpA, cmpB].forEach((v) => { if (v) v.setCamera(activeCam); });
+    }));
   $('kp-overlay').addEventListener('change', () => {
     kpOn = $('kp-overlay').checked;
     drawKpOverlay();
@@ -1040,7 +1406,7 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// ------------------------------------------- debug: overlay do esqueleto 2D
+//------------------------------------------- debug: 2D skeleton overlay
 const SKELETON_EDGES = [
   [0, 1], [0, 2], [1, 3], [2, 4], [5, 7], [7, 9], [6, 8], [8, 10],
   [5, 6], [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
@@ -1112,7 +1478,7 @@ function drawKpOverlay() {
   drawHandsOverlay(ctx, s, ox, oy, currentFrame);
 }
 
-// ------------------------------- maos detectadas (hand tracking) sobre o video
+//------------------------------- hands detected (hand tracking) on ​​the video
 const HAND_EDGES = [
   [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
   [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15],
@@ -1140,8 +1506,8 @@ function drawHandsOverlay(ctx, s, ox, oy, frameIdx) {
       ctx.beginPath(); ctx.arc(ox + p[0] * s, oy + p[1] * s, 2, 0, Math.PI * 2); ctx.fill();
     }
   };
-  desenha(hf.left, '#3d6fa8');    // mao esquerda
-  desenha(hf.right, '#b06a48');   // mao direita
+  desenha(hf.left, '#3d6fa8');    //left hand
+  desenha(hf.right, '#b06a48');   //right hand
 }
 
 function makeTextSprite(texto) {
@@ -1163,7 +1529,7 @@ function makeTextSprite(texto) {
   return spr;
 }
 
-// ---------------------------------------------------- sync rotation entre paineis
+//------------------------------------------------------- sync rotation between panels
 let syncRot = true;
 try { syncRot = localStorage.getItem('v2m:syncRot') !== '0'; } catch (e) { /* sem storage */ }
 
@@ -1200,7 +1566,6 @@ function ligarSyncRot() {
 function step() {
   if (!playing || !clip) return;
   currentFrame = (currentFrame + 1) % clip.num_frames;
-  $('frame').value = currentFrame;
   syncSliders();
   setTimeout(step, 1000 / Math.max(clip.fps, 1));
 }
